@@ -13,13 +13,13 @@ pub const fn new_clock(clock: u16) -> Clock {
 
 impl Into<u16> for Clock {
     fn into(self) -> u16 {
-        return self.0
+        return self.0;
     }
 }
 
 impl From<u16> for Clock {
     fn from(value: u16) -> Self {
-        return Self(value)
+        return Self(value);
     }
 }
 
@@ -31,15 +31,25 @@ impl fmt::Display for Clock {
 
 // Describes the strictness (<, <=) of the constraint between two clocks in the DBM.
 #[derive(PartialEq, Debug)]
-pub struct Strictness(bool);
-const STRICT: Strictness = Strictness(false);
-const WEAK: Strictness = Strictness(true);
+pub enum Strictness {
+    Strict,
+    Weak,
+}
+
+impl Strictness {
+    pub const fn opposite(&self) -> Self {
+        match self {
+            Strictness::Strict => Strictness::Weak,
+            Strictness::Weak => Strictness::Strict,
+        }
+    }
+}
 
 impl fmt::Display for Strictness {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match *self {
-            STRICT => write!(f, "<"),
-            WEAK => write!(f, "≤"),
+        match self {
+            Strictness::Strict => write!(f, "<"),
+            Strictness::Weak => write!(f, "≤"),
         }
     }
 }
@@ -57,15 +67,19 @@ const MIN_LIMIT: i16 = -16384;
 const MAX_LIMIT: i16 = 16383;
 
 // Inifity is all 1's (Max unsigned bit representation) this is the same as (∞, ≤).
-const INFINITY: Relation = new_relation(MAX_LIMIT, WEAK);
+const INFINITY: Relation = Relation::new(MAX_LIMIT, Strictness::Weak);
 // Zero is just a relation with limit of 0 but it is weak and thereby includes 0 (0, ≤).
-const ZERO: Relation = new_relation(0, WEAK);
-
-pub const fn new_relation(limit: i16, strictness: Strictness) -> Relation {
-    Relation((limit << 1) | strictness.0 as i16)
-}
+const ZERO: Relation = Relation::new(0, Strictness::Weak);
 
 impl Relation {
+    pub const fn new(limit: i16, strictness: Strictness) -> Self {
+        let strictness_bit = match strictness {
+            Strictness::Strict => 0,
+            Strictness::Weak => 1,
+        };
+        Self((limit << 1) | strictness_bit)
+    }
+
     // Returns the limit of the relation which can be
     // represented with one less bit than the relation
     // as the last bit describes the relation's strictness.
@@ -76,9 +90,9 @@ impl Relation {
     // Returns the strictness of the relation.
     pub const fn strictness(&self) -> Strictness {
         if self.is_strict() {
-            return STRICT;
+            return Strictness::Strict;
         }
-        return WEAK;
+        return Strictness::Weak;
     }
 
     // Returns true if the strictness of the relation is strict.
@@ -104,6 +118,36 @@ impl Relation {
     // If the relation is (0, <) then it can never be true.
     pub const fn is_contradition(&self) -> bool {
         self.limit() == MIN_LIMIT && self.is_strict()
+    }
+
+    // Negates the relation and returns self.
+    pub const fn negation(&self) -> Self {
+        Self::new(-self.limit(), self.strictness().opposite())
+    }
+
+    // Returns the sum of two constraints. The sum is satisfies both original constraints (lhs/rhs).
+    // In other words, it does not allow any behavior that violates either of the
+    // original constraints. to ensure that the sum captures the intersection of the
+    // original constraints accurately, we choose the tightest or most restrictive
+    // relation that satisfies both original constraints. This ensures that the
+    // resulting constraint is as tight as possible while still being consistent
+    // with the original constraints. Thereby, if one relation is ≤ (i.e., 1)
+    // then it is keps over < (i.e., 0). Addition does not handle overflows, and
+    // therefore yeilds undefined behaviour.
+    // This addition is mostly used to compute the accumulated path when closing a DBM.
+    pub const fn add(&self, other: &Self) -> Self {
+        if self.is_infinity() || other.is_infinity() {
+            return INFINITY
+        }
+        
+        // First adding the lhs and rhs increases the limit.
+        // Then we ensure the tightest constraint that satisfies both constraints is kept.
+        Self((self.0 + other.0) - ((self.0 | other.0) & 1))
+    }
+
+    // subtract other from self by "self + (-other)".
+    pub const fn subtract(&self, other: &Self) -> Self {
+        self.add(&other.negation())
     }
 }
 
@@ -135,6 +179,7 @@ impl fmt::Display for Relation {
     }
 }
 
+// Q: Would an enum be better here? Upper, Lower, and Diagonal constraint? Or Straight, and Diagonal constraint?
 pub struct Constraint {
     lhs: Clock,
     rhs: Clock,
@@ -142,14 +187,10 @@ pub struct Constraint {
 }
 
 pub const fn new_constraint(lhs: Clock, rhs: Clock, relation: Relation) -> Constraint {
-    Constraint {
-        lhs: lhs,
-        rhs: rhs,
-        relation: relation,
-    }
+    Constraint { lhs, rhs, relation }
 }
 
-impl  fmt::Display for Constraint {
+impl fmt::Display for Constraint {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} - {} {}", self.lhs, self.rhs, self.relation)
     }
@@ -167,45 +208,47 @@ mod tests {
     }
 
     #[test]
-    fn strict_is_true() {
-        assert_eq!(Strictness(false), STRICT)
-    }
-
-    #[test]
-    fn weak_is_false() {
-        assert_eq!(Strictness(true), WEAK)
-    }
-
-    #[test]
     fn weak_formatted_is_less_than_or_equal() {
-        assert_eq!("≤", WEAK.to_string())
+        assert_eq!("≤", Strictness::Weak.to_string())
     }
 
     #[test]
     fn strict_formatted_is_less_than() {
-        assert_eq!("<", STRICT.to_string())
+        assert_eq!("<", Strictness::Strict.to_string())
     }
 
     #[test]
     fn new_relation_returns_correct_strictness() {
-        assert_eq!(WEAK, new_relation(0, WEAK).strictness());
-        assert_eq!(STRICT, new_relation(0, STRICT).strictness());
-        assert_eq!(WEAK, new_relation(i16::MAX, WEAK).strictness());
-        assert_eq!(STRICT, new_relation(i16::MAX, STRICT).strictness());
+        assert_eq!(
+            Strictness::Weak,
+            Relation::new(0, Strictness::Weak).strictness()
+        );
+        assert_eq!(
+            Strictness::Strict,
+            Relation::new(0, Strictness::Strict).strictness()
+        );
+        assert_eq!(
+            Strictness::Weak,
+            Relation::new(i16::MAX, Strictness::Weak).strictness()
+        );
+        assert_eq!(
+            Strictness::Strict,
+            Relation::new(i16::MAX, Strictness::Strict).strictness()
+        );
     }
 
     #[test]
     fn new_relation_returns_correct_limit() {
-        assert_eq!(0, new_relation(0, WEAK).limit());
-        assert_eq!(10, new_relation(10, WEAK).limit());
-        assert_eq!(-10, new_relation(-10, WEAK).limit());
-        assert_eq!(-16384, new_relation(-16384, WEAK).limit());
-        assert_eq!(16383, new_relation(16383, WEAK).limit());
+        assert_eq!(0, Relation::new(0, Strictness::Weak).limit());
+        assert_eq!(10, Relation::new(10, Strictness::Weak).limit());
+        assert_eq!(-10, Relation::new(-10, Strictness::Weak).limit());
+        assert_eq!(-16384, Relation::new(-16384, Strictness::Weak).limit());
+        assert_eq!(16383, Relation::new(16383, Strictness::Weak).limit());
 
         let mut rng = rand::thread_rng();
         for _ in 0..10_000 {
             let limit = rng.gen_range(-16384..=16383);
-            let relation = new_relation(limit, WEAK);
+            let relation = Relation::new(limit, Strictness::Weak);
             assert_eq!(limit, relation.limit())
         }
     }
@@ -213,7 +256,7 @@ mod tests {
     #[test]
     fn inifinity() {
         assert_eq!(MAX_LIMIT, INFINITY.limit());
-        assert_eq!(WEAK, INFINITY.strictness());
+        assert_eq!(Strictness::Weak, INFINITY.strictness());
         assert_eq!("(∞, ≤)", INFINITY.to_string());
         assert!(INFINITY.is_infinity());
     }
@@ -221,15 +264,21 @@ mod tests {
     #[test]
     fn zero() {
         assert_eq!(0, ZERO.limit());
-        assert_eq!(WEAK, ZERO.strictness());
+        assert_eq!(Strictness::Weak, ZERO.strictness());
         assert_eq!("(0, ≤)", ZERO.to_string());
         assert!(ZERO.is_zero())
     }
 
     #[test]
     fn relation_partial_equality() {
-        assert_eq!(new_relation(10, WEAK), new_relation(10, WEAK));
-        assert_ne!(new_relation(10, STRICT), new_relation(10, WEAK));
+        assert_eq!(
+            Relation::new(10, Strictness::Weak),
+            Relation::new(10, Strictness::Weak)
+        );
+        assert_ne!(
+            Relation::new(10, Strictness::Strict),
+            Relation::new(10, Strictness::Weak)
+        );
         assert_eq!(INFINITY, INFINITY);
         assert_eq!(ZERO, ZERO);
     }
@@ -243,27 +292,27 @@ mod tests {
         }
         let cases: [Case; 5] = [
             Case {
-                lhs: new_relation(10, WEAK),
-                rhs: new_relation(10, WEAK),
+                lhs: Relation::new(10, Strictness::Weak),
+                rhs: Relation::new(10, Strictness::Weak),
                 ordering: Ordering::Equal,
             },
             Case {
-                lhs: new_relation(10, STRICT),
-                rhs: new_relation(10, WEAK),
+                lhs: Relation::new(10, Strictness::Strict),
+                rhs: Relation::new(10, Strictness::Weak),
                 ordering: Ordering::Less,
             },
             Case {
-                lhs: new_relation(10, WEAK),
-                rhs: new_relation(10, STRICT),
+                lhs: Relation::new(10, Strictness::Weak),
+                rhs: Relation::new(10, Strictness::Strict),
                 ordering: Ordering::Greater,
             },
             Case {
                 lhs: INFINITY,
-                rhs: new_relation(10, STRICT),
+                rhs: Relation::new(10, Strictness::Strict),
                 ordering: Ordering::Greater,
             },
             Case {
-                lhs: new_relation(10, WEAK),
+                lhs: Relation::new(10, Strictness::Weak),
                 rhs: INFINITY,
                 ordering: Ordering::Less,
             },
@@ -298,7 +347,72 @@ mod tests {
 
     #[test]
     fn constraint_display() {
-        assert_eq!("0 - 0 (0, ≤)", new_constraint(REFERENCE, REFERENCE, new_relation(0, WEAK)).to_string());
-        assert_eq!("0 - 2 (0, ≤)", new_constraint(REFERENCE, new_clock(2), new_relation(0, WEAK)).to_string());
+        assert_eq!(
+            "0 - 0 (0, ≤)",
+            new_constraint(REFERENCE, REFERENCE, Relation::new(0, Strictness::Weak)).to_string()
+        );
+        assert_eq!(
+            "0 - 2 (0, ≤)",
+            new_constraint(REFERENCE, new_clock(2), Relation::new(0, Strictness::Weak)).to_string()
+        );
+    }
+
+    #[test]
+    fn relation_negation() {
+        assert_eq!(
+            "(-10, <)",
+            Relation::new(10, Strictness::Weak).negation().to_string()
+        )
+    }
+
+    #[test]
+    fn add_relation() {
+        struct Case {
+            lhs: Relation,
+            rhs: Relation,
+            expected: Relation,
+        }
+        let cases: [Case; 7] = [
+            Case {
+                lhs: Relation::new(10, Strictness::Weak),
+                rhs: Relation::new(10, Strictness::Weak),
+                expected: Relation::new(20, Strictness::Weak)
+            },
+            Case {
+                lhs: Relation::new(10, Strictness::Strict),
+                rhs: Relation::new(10, Strictness::Weak),
+                expected: Relation::new(20, Strictness::Strict)
+            },
+            Case {
+                lhs: Relation::new(10, Strictness::Weak),
+                rhs: Relation::new(10, Strictness::Strict),
+                expected: Relation::new(20, Strictness::Strict)
+            },
+            Case {
+                lhs: Relation::new(11, Strictness::Weak),
+                rhs: Relation::new(10, Strictness::Strict),
+                expected: Relation::new(21, Strictness::Strict)
+            },
+            Case {
+                lhs: INFINITY,
+                rhs: Relation::new(10, Strictness::Weak),
+                expected: INFINITY
+            },
+            Case {
+                lhs: INFINITY,
+                rhs: Relation::new(10, Strictness::Weak),
+                expected: INFINITY
+            },
+            Case {
+                lhs: INFINITY,
+                rhs: Relation::new(10, Strictness::Strict),
+                expected: INFINITY
+            },
+        ];
+
+        for case in cases {
+            let actual = case.lhs.add(&case.rhs);
+            assert_eq!(case.expected, actual, "{} + {} = {}", case.lhs, case.rhs, actual);
+        }
     }
 }
