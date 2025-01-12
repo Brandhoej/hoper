@@ -2,7 +2,6 @@ use core::panic;
 use std::ops::{Index, IndexMut};
 
 use bitset::BitSet;
-use rand::{distributions::{uniform::{SampleBorrow, UniformSampler}, Standard}, prelude::Distribution, Rng};
 
 use super::constraint::{Clock, Limit, Relation, Strictness, INFINITY, REFERENCE, ZERO};
 
@@ -364,6 +363,10 @@ impl DBM<Canonical> {
         ij <= relation || ji > relation.negation()
     }
 
+    pub fn equals(&self, clock: Clock, limit: Limit) -> bool {
+        self.upper(clock).limit() <= limit && self.lower(clock).limit() <= -limit
+    }
+
     /// Returns a vector with the length corresponding to each clock in the DBM.
     /// Each group will be assigned a unique index and every clock within the
     /// same group will always be synchronised meaning that the when valuations
@@ -662,15 +665,15 @@ impl DBM<Canonical> {
 
 impl UniformSampler for UniformDBM {
     type X = DBM<Canonical>;
-    
+
     // [low, high)
     fn new<B1, B2>(low: B1, high: B2) -> Self
     where
         B1: SampleBorrow<Self::X> + Sized,
         B2: SampleBorrow<Self::X> + Sized {
-        todo!()
+        panic!()
     }
-    
+
     // [low, high]
     fn new_inclusive<B1, B2>(low: B1, high: B2) -> Self
     where
@@ -681,9 +684,9 @@ impl UniformSampler for UniformDBM {
             high: high.borrow()
         }
     }
-    
+
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Self::X {
-        todo!()
+        panic!()
     }
 }*/
 

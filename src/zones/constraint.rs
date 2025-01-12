@@ -5,11 +5,7 @@ use std::{
     u16,
 };
 
-use rand::{
-    distributions::{Standard, Uniform},
-    prelude::Distribution,
-    Rng,
-};
+use rand::{distributions::{uniform::{SampleBorrow, SampleUniform, UniformSampler}, Standard}, prelude::Distribution, Rng};
 
 /// The unique index of a clock. This can be used to directly address the DBM.
 pub type Clock = u16;
@@ -18,9 +14,11 @@ pub type Clock = u16;
 pub const REFERENCE: Clock = 0;
 
 /// Describes the strictness (<, <=) of the constraint between two clocks in the DBM.
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone, Copy)]
 pub enum Strictness {
+    /// <
     Strict,
+    /// <=
     Weak,
 }
 
@@ -33,12 +31,21 @@ impl Strictness {
     }
 }
 
+impl From<Strictness> for u8 {
+    fn from(value: Strictness) -> Self {
+        match value {
+            Strictness::Strict => 0,
+            Strictness::Weak => 1,
+        }
+    }
+}
+
 impl Distribution<Strictness> for Standard {
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Strictness {
-        if rng.gen_bool(1.0 / 2.0) {
-            return Strictness::Strict;
+        match rng.gen_range(Strictness::Strict.into()..=Strictness::Weak.into()) {
+            0 => Strictness::Strict,
+            _ => Strictness::Weak,
         }
-        Strictness::Weak
     }
 }
 
@@ -51,13 +58,83 @@ impl fmt::Display for Strictness {
     }
 }
 
+impl PartialOrd for Strictness {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        match self {
+            Strictness::Strict => match other {
+                Strictness::Strict => Some(Ordering::Equal),
+                Strictness::Weak => Some(Ordering::Less),
+            },
+            Strictness::Weak => match other {
+                Strictness::Strict => Some(Ordering::Greater),
+                Strictness::Weak => Some(Ordering::Equal),
+            }
+        }
+    }
+}
+
+pub struct UniformStrictness {
+    low: Strictness,
+    high: Strictness,
+    inclusive: bool,
+}
+
+impl UniformSampler for UniformStrictness {
+    type X = Strictness;
+
+    fn new<B1, B2>(low: B1, high: B2) -> Self
+    where
+        B1: SampleBorrow<Self::X> + Sized,
+        B2: SampleBorrow<Self::X> + Sized {
+            let low = low.borrow();
+            let high = high.borrow();
+
+            if low >= high {
+                panic!("low cannot be higher than high")
+            }
+
+            Self { low: *low, high: *high, inclusive: false }
+    }
+
+    fn new_inclusive<B1, B2>(low: B1, high: B2) -> Self
+    where
+        B1: SampleBorrow<Self::X> + Sized,
+        B2: SampleBorrow<Self::X> + Sized {
+            let low = low.borrow();
+            let high = high.borrow();
+
+            if low > high {
+                panic!("low cannot be higher than high")
+            }
+
+            Self { low: *low, high: *high, inclusive: true }
+    }
+
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Self::X {
+        let value = if self.inclusive {
+            rng.gen_range(self.low.into()..=self.high.into())
+        } else {
+            rng.gen_range(self.low.into()..self.high.into())
+        };
+
+        match value {
+            0 => Strictness::Strict,
+            _ => Strictness::Weak
+        }
+    }
+}
+
+impl SampleUniform for Strictness {
+    type Sampler = UniformStrictness;
+}
+
 pub type Limit = i16;
 
 /// An element optimized for caching which represents a strict or weak
 /// relation between two clocks (c0 - c1 RELATION). This encoding uses
 /// the least significant bit to represent the strictness and the other
 /// bits as the limit. The encoding is [limit] [1 bit strictness].
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Debug, Clone, Copy)]
 pub struct Relation(Limit);
 
 /// The minimum possible limit the relation supports is an i15 minimum equivalent.
@@ -158,14 +235,6 @@ impl Relation {
     }
 }
 
-impl Distribution<Relation> for Standard {
-    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Relation {
-        let strictness: Strictness = rng.gen();
-        let limit: Limit = rng.gen_range(MIN_LIMIT..=MAX_LIMIT);
-        Relation::new(limit, strictness)
-    }
-}
-
 impl Add for Relation {
     type Output = Relation;
 
@@ -201,6 +270,60 @@ impl PartialOrd for Relation {
     }
 }
 
+impl Distribution<Relation> for Standard {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Relation {
+        let strictness: Strictness = rng.gen();
+        let limit: Limit = rng.gen_range(MIN_LIMIT..=MAX_LIMIT);
+        Relation::new(limit, strictness)
+    }
+}
+
+pub struct UniformRelation {
+    low: Relation,
+    high: Relation,
+    inclusive: bool,
+}
+
+impl UniformSampler for UniformRelation {
+    type X = Relation;
+
+    fn new<B1, B2>(low: B1, high: B2) -> Self
+    where
+        B1: SampleBorrow<Self::X> + Sized,
+        B2: SampleBorrow<Self::X> + Sized {
+            let low = low.borrow();
+            let high = high.borrow();
+
+            if low >= high {
+                panic!("low cannot be higher than high")
+            }
+
+            Self { low: *low, high: *high, inclusive: false }
+    }
+
+    fn new_inclusive<B1, B2>(low: B1, high: B2) -> Self
+    where
+        B1: SampleBorrow<Self::X> + Sized,
+        B2: SampleBorrow<Self::X> + Sized {
+            let low = low.borrow();
+            let high = high.borrow();
+
+            if low > high {
+                panic!("low cannot be higher than high")
+            }
+
+            Self { low: *low, high: *high, inclusive: true }
+    }
+
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Self::X {
+        todo!()
+    }
+}
+
+impl SampleUniform for Relation {
+    type Sampler = UniformRelation;
+}
+
 impl fmt::Display for Relation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.is_infinity() {
@@ -210,7 +333,7 @@ impl fmt::Display for Relation {
     }
 }
 
-/// Q: Would an enum be better here? Upper, Lower, and Diagonal constraint? Or Straight, and Diagonal constraint?
+#[derive(Clone)]
 pub struct Constraint {
     lhs: Clock,
     rhs: Clock,
@@ -231,7 +354,7 @@ impl fmt::Display for Constraint {
 
 #[cfg(test)]
 mod tests {
-    use rand::Rng;
+    use rand::{distributions::Uniform, Rng};
 
     use super::*;
 
@@ -275,8 +398,8 @@ mod tests {
         assert_eq!(0, Relation::new(0, Strictness::Weak).limit());
         assert_eq!(10, Relation::new(10, Strictness::Weak).limit());
         assert_eq!(-10, Relation::new(-10, Strictness::Weak).limit());
-        assert_eq!(-16384, Relation::new(-16384, Strictness::Weak).limit());
-        assert_eq!(16383, Relation::new(16383, Strictness::Weak).limit());
+        assert_eq!(MIN_LIMIT, Relation::new(MIN_LIMIT, Strictness::Weak).limit());
+        assert_eq!(MAX_LIMIT, Relation::new(MAX_LIMIT, Strictness::Weak).limit());
 
         let mut rng = rand::thread_rng();
         for _ in 0..10_000 {
@@ -450,6 +573,29 @@ mod tests {
                 "{} + {} = {}",
                 case.lhs, case.rhs, actual
             );
+        }
+    }
+
+    #[test]
+    fn relation_distribution_bounds() {
+        let mut rng = rand::thread_rng();
+        for _ in 0..=MAX_LIMIT {
+            let relation: Relation = rng.gen();
+            assert!(relation >= Relation::new(MIN_LIMIT, Strictness::Strict));
+            assert!(relation <= Relation::new(MAX_LIMIT, Strictness::Weak));
+        }
+    }
+
+    #[test]
+    fn strictness_uniform_sampler() {
+        let mut rng = rand::thread_rng();
+        let low = Strictness::Weak;
+        let high = Strictness::Weak;
+        let sampler = Uniform::new_inclusive(low, high);
+        for _ in 0..=100 {
+            let strictness = sampler.sample(&mut rng);
+            assert!(strictness >= low);
+            assert!(strictness <= high);
         }
     }
 }

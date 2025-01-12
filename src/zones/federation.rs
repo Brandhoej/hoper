@@ -1,7 +1,7 @@
 use std::vec;
 
 use super::{
-    constraint::Clock,
+    constraint::{Clock, Limit, Relation, Strictness, REFERENCE},
     dbm::{Canonical, DBM},
 };
 
@@ -24,13 +24,18 @@ impl Federation {
     }
 
     #[inline]
-    pub fn empty(clocks: Clock) -> Federation {
-        Federation::new(clocks, vec![])
+    pub fn zero(clocks: Clock) -> Self {
+        Self::new(clocks, vec![DBM::zero(clocks)])
     }
 
     #[inline]
     pub fn universe(clocks: Clock) -> Federation {
         Federation::new(clocks, vec![DBM::universe(clocks)])
+    }
+
+    #[inline]
+    pub fn empty(clocks: Clock) -> Federation {
+        Federation::new(clocks, vec![])
     }
 
     #[inline]
@@ -59,6 +64,43 @@ impl Federation {
     #[inline]
     pub fn can_delay_indefinite(&self) -> bool {
         self.dbms.iter().any(|dbm| dbm.can_delay_indefinite())
+    }
+
+    #[inline]
+    pub fn iter(&self) -> impl Iterator<Item = &DBM<Canonical>> {
+        self.dbms.iter()
+    }
+
+    #[inline]
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut DBM<Canonical>> {
+        self.dbms.iter_mut()
+    }
+
+    #[inline]
+    pub fn filter_map_mut<F>(self, f: F) -> Self
+    where
+        F: FnMut(DBM<Canonical>) -> Option<DBM<Canonical>>,
+    {
+        return Self::new(self.clocks(), self.dbms.into_iter().filter_map(f).collect());
+    }
+
+    #[inline]
+    pub fn tighten_relation(self, i: Clock, j: Clock, relation: Relation) -> Self {
+        self.filter_map_mut(move |dbm| match dbm.tighten(i, j, relation) {
+            Ok(dbm) => Some(dbm),
+            Err(_) => None,
+        })
+    }
+
+    #[inline]
+    pub fn tighten_limit(self, i: Clock, j: Clock, limit: Limit) -> Self {
+        self.tighten_relation(i, j, Relation::new(limit, Strictness::Weak))
+            .tighten_relation(j, i, Relation::new(-limit, Strictness::Weak))
+    }
+
+    pub fn clear(mut self) -> Self {
+        self.dbms.clear();
+        self
     }
 
     pub fn fmt_disjunctions(&self, labels: &Vec<&str>) -> String {
@@ -120,7 +162,7 @@ impl Federation {
         for dbm in self.dbms {
             match dbm.intersection(operand) {
                 Some(dbm) => intersection.dbms.push(dbm),
-                None => todo!(),
+                None => continue,
             }
         }
 
