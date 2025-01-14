@@ -1,6 +1,4 @@
-use crate::zones::{
-    constraint::{Relation, Strictness},
-};
+use crate::zones::constraint::{Relation, Strictness};
 
 use super::{
     expressions::{Binary, Comparison, Expression, Unary},
@@ -9,25 +7,50 @@ use super::{
     tiots::Valuations,
 };
 
-pub struct Interpreter {}
+pub struct Extrapolator {
+    stack: Vec<Literal>,
+}
 
-impl Interpreter {
-    pub const fn new() -> Self {
-        Self {}
+impl Extrapolator {
+    pub const fn new(stack: Vec<Literal>) -> Self {
+        Self { stack }
     }
 
-    pub fn expression(&self, valuations: Valuations, expression: &Expression) -> Valuations {
+    pub const fn empty() -> Self {
+        Self::new(vec![])
+    }
+
+    pub fn expression(&mut self, mut valuations: Valuations, expression: &Expression) -> Valuations {
         match expression {
             Expression::Unary(unary, operand) => match unary {
                 Unary::Inverse => self.expression(valuations, &operand).inverse(),
             },
             Expression::Binary(lhs, operator, rhs) => match operator {
-                Binary::Conjunction => self
-                    .expression(valuations.clone(), &lhs)
-                    .union(self.expression(valuations, &rhs)),
-                Binary::Disjunction => self
-                    .expression(valuations.clone(), &lhs)
-                    .intersection(self.expression(valuations, &rhs)),
+                Binary::Conjunction => {
+                    valuations = self.expression(valuations.clone(), &lhs);
+                    if self.stack.pop().unwrap().boolean().unwrap() {
+                        valuations = self.expression(valuations, &rhs);
+                        if self.stack.pop().unwrap().boolean().unwrap() {
+                            valuations
+                        } else {
+                            valuations.clear()
+                        }
+                    } else {
+                        valuations.clear()
+                    }
+                }
+                Binary::Disjunction => {
+                    valuations = self.expression(valuations.clone(), &lhs);
+                    if !self.stack.pop().unwrap().boolean().unwrap() {
+                        valuations = self.expression(valuations, &rhs);
+                    }
+
+                    if self.stack.last().unwrap().boolean().unwrap() {
+                        valuations
+                    } else {
+                        valuations.clear()
+                    }
+                },
             },
             Expression::Group(expression) => self.expression(valuations, expression),
             Expression::ClockConstraint(clock, comparison, limit) => match comparison {
@@ -38,7 +61,7 @@ impl Interpreter {
                 Comparison::Equal => valuations.set_clock_limit(*clock, *limit),
                 Comparison::GreaterThanOrEqual => valuations
                     .set_clock_lower_limit(*clock, Relation::new(*limit, Strictness::Weak)),
-                Comparison::GreaterThen => valuations
+                Comparison::GreaterThan => valuations
                     .set_clock_lower_limit(*clock, Relation::new(*limit, Strictness::Strict)),
             },
             Expression::DiagonalClockConstraint(lhs, rhs, comparison, limit) => match comparison {
@@ -58,17 +81,20 @@ impl Interpreter {
                     *lhs,
                     Relation::new(*limit, Strictness::Weak),
                 ),
-                Comparison::GreaterThen => valuations.set_diagonal_constraint(
+                Comparison::GreaterThan => valuations.set_diagonal_constraint(
                     *rhs,
                     *lhs,
                     Relation::new(*limit, Strictness::Strict),
                 ),
             },
-            Expression::Literal(literal) => todo!(),
+            Expression::Literal(literal) => {
+                self.stack.push(literal.clone());
+                valuations
+            }
         }
     }
 
-    pub fn statement(&self, valuations: Valuations, statement: &Statement) -> Valuations {
+    pub fn statement(&mut self, valuations: Valuations, statement: &Statement) -> Valuations {
         match statement {
             Statement::Sequence(statements) | Statement::Branch(statements) => {
                 statements.iter().fold(valuations, |valuations, statement| {

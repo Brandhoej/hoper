@@ -38,7 +38,7 @@ pub enum Comparison {
     LessThan,
     Equal,
     GreaterThanOrEqual,
-    GreaterThen,
+    GreaterThan,
 }
 
 impl Display for Comparison {
@@ -48,7 +48,7 @@ impl Display for Comparison {
             Comparison::LessThan => write!(f, "<"),
             Comparison::Equal => write!(f, "=="),
             Comparison::GreaterThanOrEqual => write!(f, "≥"),
-            Comparison::GreaterThen => write!(f, ">"),
+            Comparison::GreaterThan => write!(f, ">"),
         }
     }
 }

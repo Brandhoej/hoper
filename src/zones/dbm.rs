@@ -1,7 +1,14 @@
-use core::panic;
 use std::ops::{Index, IndexMut};
 
 use bitset::BitSet;
+use rand::{
+    distributions::{
+        uniform::{SampleBorrow, SampleUniform, UniformSampler},
+        Uniform,
+    },
+    prelude::Distribution,
+    Rng,
+};
 
 use super::constraint::{Clock, Limit, Relation, Strictness, INFINITY, REFERENCE, ZERO};
 
@@ -656,39 +663,37 @@ impl DBM<Canonical> {
             state: Dirty::new(clocks),
         }
     }
-}
 
-/*pub struct UniformDBM {
-    low: DBM<Canonical>,
-    high: DBM<Canonical>,
-}
-
-impl UniformSampler for UniformDBM {
-    type X = DBM<Canonical>;
-
-    // [low, high)
-    fn new<B1, B2>(low: B1, high: B2) -> Self
-    where
-        B1: SampleBorrow<Self::X> + Sized,
-        B2: SampleBorrow<Self::X> + Sized {
-        panic!()
+    pub fn sample_subset(&self) -> DBM<Canonical> {
+        todo!()
     }
 
-    // [low, high]
-    fn new_inclusive<B1, B2>(low: B1, high: B2) -> Self
-    where
-        B1: SampleBorrow<Self::X> + Sized,
-        B2: SampleBorrow<Self::X> + Sized {
-        Self {
-            low: low.borrow(),
-            high: high.borrow()
+    pub fn sample_superset(&self) -> DBM<Canonical> {
+        let mut dbm = self.clone().dirty();
+
+        for i in 0..dbm.clocks() {
+            for j in 0..dbm.clocks() {
+                dbm[(i, j)] = if dbm[(i, j)].is_infinity() {
+                    INFINITY
+                } else {
+                    // TODO: Ensure that limit does not overflow.
+                    dbm[(i, j)] + Relation::new(20, Strictness::Strict)
+                }
+            }
         }
-    }
 
-    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Self::X {
-        panic!()
+        for i in 0..dbm.clocks() {
+            // Restore reflexive constraints.
+            dbm[(i, i)] = ZERO;
+
+            if dbm[(0, i)] > ZERO {
+                dbm[(0, i)] = ZERO;
+            }
+        }
+
+        dbm.clean().ok().unwrap()
     }
-}*/
+}
 
 pub struct Unsafe {}
 impl DBMState for Unsafe {}

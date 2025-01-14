@@ -5,7 +5,7 @@ use crate::zones::{
 
 use super::{
     action::Action,
-    interpreter::Interpreter,
+    extrapolator::Extrapolator,
     ioa::IOA,
     ta::TA,
     tioa::{LocationTree, TIOA},
@@ -27,6 +27,10 @@ impl Valuations {
 
     pub fn universe(clocks: Clock) -> Self {
         Self::new(Federation::universe(clocks))
+    }
+
+    pub const fn clocks(&self) -> Clock {
+        self.federation.clocks()
     }
 
     pub fn clear(mut self) -> Self {
@@ -136,7 +140,7 @@ impl<T: TIOA> TIOTS for T {
     }
 
     fn transitions(&self, source: State, action: Action) -> Result<Vec<Transition>, ()> {
-        let mut interpreter = Interpreter::new();
+        let mut interpreter = Extrapolator::empty();
 
         match self.outgoing(source.location(), action) {
             Ok(outgoings) => {

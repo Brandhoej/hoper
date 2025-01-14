@@ -5,7 +5,14 @@ use std::{
     u16,
 };
 
-use rand::{distributions::{uniform::{SampleBorrow, SampleUniform, UniformSampler}, Standard}, prelude::Distribution, Rng};
+use rand::{
+    distributions::{
+        uniform::{SampleBorrow, SampleUniform, UniformSampler},
+        Standard,
+    },
+    prelude::Distribution,
+    Rng,
+};
 
 /// The unique index of a clock. This can be used to directly address the DBM.
 pub type Clock = u16;
@@ -68,7 +75,7 @@ impl PartialOrd for Strictness {
             Strictness::Weak => match other {
                 Strictness::Strict => Some(Ordering::Greater),
                 Strictness::Weak => Some(Ordering::Equal),
-            }
+            },
         }
     }
 }
@@ -85,29 +92,39 @@ impl UniformSampler for UniformStrictness {
     fn new<B1, B2>(low: B1, high: B2) -> Self
     where
         B1: SampleBorrow<Self::X> + Sized,
-        B2: SampleBorrow<Self::X> + Sized {
-            let low = low.borrow();
-            let high = high.borrow();
+        B2: SampleBorrow<Self::X> + Sized,
+    {
+        let low = low.borrow();
+        let high = high.borrow();
 
-            if low >= high {
-                panic!("low cannot be higher than high")
-            }
+        if low >= high {
+            panic!("low cannot be higher than high")
+        }
 
-            Self { low: *low, high: *high, inclusive: false }
+        Self {
+            low: *low,
+            high: *high,
+            inclusive: false,
+        }
     }
 
     fn new_inclusive<B1, B2>(low: B1, high: B2) -> Self
     where
         B1: SampleBorrow<Self::X> + Sized,
-        B2: SampleBorrow<Self::X> + Sized {
-            let low = low.borrow();
-            let high = high.borrow();
+        B2: SampleBorrow<Self::X> + Sized,
+    {
+        let low = low.borrow();
+        let high = high.borrow();
 
-            if low > high {
-                panic!("low cannot be higher than high")
-            }
+        if low > high {
+            panic!("low cannot be higher than high")
+        }
 
-            Self { low: *low, high: *high, inclusive: true }
+        Self {
+            low: *low,
+            high: *high,
+            inclusive: true,
+        }
     }
 
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Self::X {
@@ -119,7 +136,7 @@ impl UniformSampler for UniformStrictness {
 
         match value {
             0 => Strictness::Strict,
-            _ => Strictness::Weak
+            _ => Strictness::Weak,
         }
     }
 }
@@ -290,33 +307,64 @@ impl UniformSampler for UniformRelation {
     fn new<B1, B2>(low: B1, high: B2) -> Self
     where
         B1: SampleBorrow<Self::X> + Sized,
-        B2: SampleBorrow<Self::X> + Sized {
-            let low = low.borrow();
-            let high = high.borrow();
+        B2: SampleBorrow<Self::X> + Sized,
+    {
+        let low = low.borrow();
+        let high = high.borrow();
 
-            if low >= high {
-                panic!("low cannot be higher than high")
-            }
+        if low >= high {
+            panic!("low cannot be higher than high");
+        }
 
-            Self { low: *low, high: *high, inclusive: false }
+        Self {
+            low: *low,
+            high: *high,
+            inclusive: false,
+        }
     }
 
     fn new_inclusive<B1, B2>(low: B1, high: B2) -> Self
     where
         B1: SampleBorrow<Self::X> + Sized,
-        B2: SampleBorrow<Self::X> + Sized {
-            let low = low.borrow();
-            let high = high.borrow();
+        B2: SampleBorrow<Self::X> + Sized,
+    {
+        let low = low.borrow();
+        let high = high.borrow();
 
-            if low > high {
-                panic!("low cannot be higher than high")
-            }
+        if low > high {
+            panic!("low cannot be higher than high");
+        }
 
-            Self { low: *low, high: *high, inclusive: true }
+        Self {
+            low: *low,
+            high: *high,
+            inclusive: true,
+        }
     }
 
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Self::X {
-        todo!()
+        let limit = if self.inclusive {
+            rng.gen_range(self.low.limit()..=self.high.limit())
+        } else {
+            rng.gen_range(self.low.limit()..self.high.limit())
+        };
+
+        let strictness = UniformStrictness {
+            low: if self.low.limit() == self.high.limit() {
+                self.low.strictness()
+            } else {
+                Strictness::Strict
+            },
+            high: if self.low.limit() == self.high.limit() {
+                self.high.strictness()
+            } else {
+                Strictness::Weak
+            },
+            inclusive: self.inclusive && self.low.limit() == self.high.limit(),
+        }
+        .sample(rng);
+
+        Relation::new(limit, strictness)
     }
 }
 
@@ -398,8 +446,14 @@ mod tests {
         assert_eq!(0, Relation::new(0, Strictness::Weak).limit());
         assert_eq!(10, Relation::new(10, Strictness::Weak).limit());
         assert_eq!(-10, Relation::new(-10, Strictness::Weak).limit());
-        assert_eq!(MIN_LIMIT, Relation::new(MIN_LIMIT, Strictness::Weak).limit());
-        assert_eq!(MAX_LIMIT, Relation::new(MAX_LIMIT, Strictness::Weak).limit());
+        assert_eq!(
+            MIN_LIMIT,
+            Relation::new(MIN_LIMIT, Strictness::Weak).limit()
+        );
+        assert_eq!(
+            MAX_LIMIT,
+            Relation::new(MAX_LIMIT, Strictness::Weak).limit()
+        );
 
         let mut rng = rand::thread_rng();
         for _ in 0..10_000 {
@@ -581,21 +635,58 @@ mod tests {
         let mut rng = rand::thread_rng();
         for _ in 0..=MAX_LIMIT {
             let relation: Relation = rng.gen();
-            assert!(relation >= Relation::new(MIN_LIMIT, Strictness::Strict));
-            assert!(relation <= Relation::new(MAX_LIMIT, Strictness::Weak));
+            assert!(
+                relation >= Relation::new(MIN_LIMIT, Strictness::Strict)
+                    && relation <= Relation::new(MAX_LIMIT, Strictness::Weak)
+            );
         }
     }
 
     #[test]
     fn strictness_uniform_sampler() {
         let mut rng = rand::thread_rng();
+        let low = Strictness::Strict;
+        let high = Strictness::Weak;
+        let sampler = Uniform::new(low, high);
+        for _ in 0..=100 {
+            let strictness = sampler.sample(&mut rng);
+            assert!(strictness >= low && strictness < high);
+        }
+    }
+
+    #[test]
+    fn strictness_uniform_inclusive_sampler() {
+        let mut rng = rand::thread_rng();
         let low = Strictness::Weak;
         let high = Strictness::Weak;
         let sampler = Uniform::new_inclusive(low, high);
         for _ in 0..=100 {
             let strictness = sampler.sample(&mut rng);
-            assert!(strictness >= low);
-            assert!(strictness <= high);
+            assert!(strictness >= low && strictness <= high);
+        }
+    }
+
+    #[test]
+    fn relation_uniform_sampler() {
+        let mut rng = rand::thread_rng();
+        let low = Relation::new(100, Strictness::Strict);
+        let high = Relation::new(1000, Strictness::Strict);
+        let sampler = Uniform::new(low, high);
+        for _ in 0..=MAX_LIMIT {
+            let relation = sampler.sample(&mut rng);
+            assert!(relation >= low && relation < high);
+        }
+    }
+
+    #[test]
+    fn relation_uniform_inclusive_sampler() {
+        let mut rng = rand::thread_rng();
+        let low = Relation::new(100, Strictness::Strict);
+        let high = Relation::new(1000, Strictness::Strict);
+        let sampler = Uniform::new_inclusive(low, high);
+        for _ in 0..=MAX_LIMIT {
+            let relation = sampler.sample(&mut rng);
+            assert!(relation >= low && relation <= high);
         }
     }
 }
