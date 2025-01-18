@@ -1,7 +1,4 @@
-use crate::zones::{
-    constraint::{Clock, Limit, Relation, REFERENCE},
-    federation::Federation,
-};
+use crate::zones::federation::Federation;
 
 use super::{
     action::Action,
@@ -12,82 +9,16 @@ use super::{
 };
 
 #[derive(Clone)]
-pub struct Valuations {
+pub struct State {
+    location: LocationTree,
     federation: Federation,
 }
 
-impl Valuations {
-    pub fn new(clocks: Federation) -> Self {
-        Self { federation: clocks }
-    }
-
-    pub fn zero(clocks: Clock) -> Self {
-        Self::new(Federation::zero(clocks))
-    }
-
-    pub fn universe(clocks: Clock) -> Self {
-        Self::new(Federation::universe(clocks))
-    }
-
-    pub const fn clocks(&self) -> Clock {
-        self.federation.clocks()
-    }
-
-    pub fn clear(mut self) -> Self {
-        self.federation = self.federation.clear();
-        self
-    }
-
-    pub fn inverse(mut self) -> Self {
-        self.federation = self.federation.inverse();
-        self
-    }
-
-    pub fn union(mut self, other: Self) -> Self {
-        self.federation.union(other.federation);
-        self
-    }
-
-    pub fn intersection(mut self, other: Self) -> Self {
-        self.federation = self.federation.intersection(other.federation);
-        self
-    }
-
-    pub fn set_diagonal_constraint(mut self, i: Clock, j: Clock, relation: Relation) -> Self {
-        self.federation = self.federation.tighten_relation(i, j, relation);
-        self
-    }
-
-    pub fn set_clocks_to_be_equal(mut self, i: Clock, j: Clock, limit: Limit) -> Self {
-        self.federation = self.federation.tighten_limit(i, j, limit);
-        self
-    }
-
-    pub fn set_clock_limit(mut self, clock: Clock, limit: Limit) -> Self {
-        self.federation = self.federation.tighten_limit(clock, REFERENCE, limit);
-        self
-    }
-
-    pub fn set_clock_upper_limit(mut self, clock: Clock, relation: Relation) -> Self {
-        todo!()
-    }
-
-    pub fn set_clock_lower_limit(mut self, clock: Clock, relation: Relation) -> Self {
-        todo!()
-    }
-}
-
-#[derive(Clone)]
-pub struct State {
-    location: LocationTree,
-    valuations: Valuations,
-}
-
 impl State {
-    pub const fn new(location: LocationTree, valuations: Valuations) -> Self {
+    pub const fn new(location: LocationTree, federation: Federation) -> Self {
         Self {
             location,
-            valuations,
+            federation,
         }
     }
 
@@ -95,8 +26,8 @@ impl State {
         &self.location
     }
 
-    pub const fn valuations(&self) -> &Valuations {
-        &self.valuations
+    pub const fn valuations(&self) -> &Federation {
+        &self.federation
     }
 }
 
@@ -134,13 +65,13 @@ where
 impl<T: TIOA> TIOTS for T {
     fn initial(&self) -> State {
         let clocks = self.clocks();
-        let valuations = Valuations::zero(clocks);
+        let federation = Federation::zero(clocks);
         let location = TIOA::initial(self);
-        State::new(location, valuations)
+        State::new(location, federation)
     }
 
     fn transitions(&self, source: State, action: Action) -> Result<Vec<Transition>, ()> {
-        let mut interpreter = Extrapolator::empty();
+        let mut extrapolator = Extrapolator::empty();
 
         match self.outgoing(source.location(), action) {
             Ok(outgoings) => {

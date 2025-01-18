@@ -1,10 +1,4 @@
-use super::{
-    action::Action,
-    channel::Channel,
-    expressions::Expression,
-    statements::Statement,
-    tiots::{State, Valuations},
-};
+use super::{action::Action, channel::Channel, expressions::Expression, statements::Statement};
 
 /// Represents a symbolic transition for an automaton. Intuitively this means that an edge
 /// represents a set of transitions. The edge is either an input or output depending on

@@ -10,6 +10,8 @@ use rand::{
     Rng,
 };
 
+use crate::zones::constraint::UniformRelations;
+
 use super::constraint::{Clock, Limit, Relation, Strictness, INFINITY, REFERENCE, ZERO};
 
 pub trait DBMState: Sized {}
@@ -31,6 +33,10 @@ impl<State: DBMState> DBM<State> {
 
     pub const fn constraints(&self) -> usize {
         (self.clocks() * self.clocks()) as usize
+    }
+
+    pub fn relations(&self) -> &Vec<Relation> {
+        &self.relations
     }
 
     /// Uses the row-wise indexing and not the layered approach since we have the clock set in the DBM.
@@ -664,21 +670,14 @@ impl DBM<Canonical> {
         }
     }
 
-    pub fn sample_subset(&self) -> DBM<Canonical> {
-        todo!()
-    }
-
-    pub fn sample_superset(&self) -> DBM<Canonical> {
+    pub fn expand(&self, expansion: Relation) -> DBM<Canonical> {
         let mut dbm = self.clone().dirty();
 
         for i in 0..dbm.clocks() {
             for j in 0..dbm.clocks() {
-                dbm[(i, j)] = if dbm[(i, j)].is_infinity() {
-                    INFINITY
-                } else {
-                    // TODO: Ensure that limit does not overflow.
-                    dbm[(i, j)] + Relation::new(20, Strictness::Strict)
-                }
+                if !dbm[(i, j)].is_infinity() {
+                    dbm[(i, j)] = dbm[(i, j)] + expansion
+                };
             }
         }
 
@@ -705,7 +704,7 @@ pub struct Dirty {
 impl DBMState for Dirty {}
 
 impl Dirty {
-    fn new(clocks: Clock) -> Self {
+    pub fn new(clocks: Clock) -> Self {
         return Self {
             flags: BitSet::with_capacity((clocks * clocks) as usize),
         };
@@ -718,9 +717,34 @@ impl Dirty {
     fn touch(&mut self, clock: Clock) {
         self.flags.set(clock as usize, true);
     }
+
+    fn touch_all(&mut self) {
+        self.flags.reset();
+        self.flags.flip_all();
+    }
 }
 
 impl DBM<Dirty> {
+    pub fn from_relations(relations: Vec<Relation>) -> Result<DBM<Dirty>, ()> {
+        let mut clocks: usize = 0;
+        while clocks * clocks < relations.len() {
+            clocks += 1;
+        }
+
+        if clocks * clocks != relations.len() {
+            return Err(());
+        }
+
+        let mut state = Dirty::new(clocks as Clock);
+        state.touch_all();
+
+        Ok(Self {
+            clocks: clocks as Clock,
+            relations,
+            state,
+        })
+    }
+
     pub fn clean(self) -> Result<DBM<Canonical>, DBM<Unsafe>> {
         self.close()
     }
@@ -768,9 +792,11 @@ impl IndexMut<(Clock, Clock)> for DBM<Dirty> {
 
 #[cfg(test)]
 mod tests {
-    use crate::zones::constraint::{Relation, Strictness};
+    use rand::distributions::uniform::UniformSampler;
 
-    use super::{Canonical, DBM};
+    use crate::zones::constraint::{Relation, RelationsSample, Strictness, UniformRelations};
+
+    use super::{Canonical, Dirty, DBM};
 
     fn dbm1() -> DBM<Canonical> {
         let mut dbm = DBM::zero(2);
@@ -817,6 +843,24 @@ mod tests {
         match dbm.close() {
             Ok(valid) => valid,
             Err(_) => panic!("dbm3 invalid"),
+        }
+    }
+
+    #[test]
+    fn sample_between_zero_and_universe() {
+        let low = DBM::zero(2);
+        let high = low.clone().expand(Relation::new(16, Strictness::Weak));
+
+        let mut rng = rand::thread_rng();
+        let sampler = UniformRelations::new_inclusive(
+            RelationsSample::new(low.relations().clone()),
+            RelationsSample::new(high.relations().clone()),
+        );
+
+        for _ in 0..=10000 {
+            let sample = sampler.sample(&mut rng);
+            let dbm = DBM::<Dirty>::from_relations(sample.relations()).unwrap();
+            assert!(dbm.clean().is_ok())
         }
     }
 

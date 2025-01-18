@@ -98,9 +98,20 @@ impl Federation {
             .tighten_relation(j, i, Relation::new(-limit, Strictness::Weak))
     }
 
+    #[inline]
     pub fn clear(mut self) -> Self {
         self.dbms.clear();
         self
+    }
+
+    #[inline]
+    pub fn tighten_upper(self, clock: Clock, relation: Relation) -> Self {
+        self.tighten_relation(clock, REFERENCE, relation)
+    }
+
+    #[inline]
+    pub fn tighten_lower(self, clock: Clock, relation: Relation) -> Self {
+        self.tighten_relation(REFERENCE, clock, relation)
     }
 
     pub fn fmt_disjunctions(&self, labels: &Vec<&str>) -> String {

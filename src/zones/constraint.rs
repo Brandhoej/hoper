@@ -2,13 +2,13 @@ use std::{
     cmp::Ordering,
     fmt,
     ops::{Add, Sub},
-    u16,
+    u16, usize,
 };
 
 use rand::{
     distributions::{
         uniform::{SampleBorrow, SampleUniform, UniformSampler},
-        Standard,
+        Standard, Uniform,
     },
     prelude::Distribution,
     Rng,
@@ -162,7 +162,11 @@ pub const MAX_LIMIT: Limit = 16383;
 /// Inifity is all 1's (Max unsigned bit representation) this is the same as (∞, ≤).
 pub const INFINITY: Relation = Relation::new(MAX_LIMIT, Strictness::Weak);
 /// Zero is just a relation with limit of 0 but it is weak and thereby includes 0 (0, ≤).
+///
+/// TODO: More appropriately this should be called `POSITIVE`.
 pub const ZERO: Relation = Relation::new(0, Strictness::Weak);
+/// Describes the relation consisting of all negative number (0, <).
+pub const NEGATIVE: Relation = Relation::new(0, Strictness::Strict);
 
 impl Relation {
     pub const fn new(limit: Limit, strictness: Strictness) -> Self {
@@ -236,6 +240,8 @@ impl Relation {
     /// then it is keps over < (i.e., 0). Addition does not handle overflows, and
     /// therefore yeilds undefined behaviour.
     /// This addition is mostly used to compute the accumulated path when closing a DBM.
+    ///
+    /// OBS: Addition can overflow!
     pub const fn addition(&self, other: &Self) -> Self {
         if self.is_infinity() || other.is_infinity() {
             return INFINITY;
@@ -349,20 +355,16 @@ impl UniformSampler for UniformRelation {
             rng.gen_range(self.low.limit()..self.high.limit())
         };
 
-        let strictness = UniformStrictness {
-            low: if self.low.limit() == self.high.limit() {
-                self.low.strictness()
-            } else {
-                Strictness::Strict
-            },
-            high: if self.low.limit() == self.high.limit() {
-                self.high.strictness()
-            } else {
-                Strictness::Weak
-            },
-            inclusive: self.inclusive && self.low.limit() == self.high.limit(),
-        }
-        .sample(rng);
+        let (strictest, weakest) = if self.low.limit() == self.high.limit() {
+            (self.low.strictness(), self.high.strictness())
+        } else if limit == self.low.limit() {
+            (self.low.strictness(), Strictness::Weak)
+        } else if limit == self.high.limit() {
+            (Strictness::Strict, self.high.strictness())
+        } else {
+            (Strictness::Strict, Strictness::Weak)
+        };
+        let strictness: Strictness = Uniform::new_inclusive(strictest, weakest).sample(rng);
 
         Relation::new(limit, strictness)
     }
@@ -370,6 +372,105 @@ impl UniformSampler for UniformRelation {
 
 impl SampleUniform for Relation {
     type Sampler = UniformRelation;
+}
+
+#[derive(Clone)]
+pub struct RelationsSample(Vec<Relation>);
+
+impl RelationsSample {
+    pub fn new(relations: Vec<Relation>) -> Self {
+        Self(relations)
+    }
+
+    pub fn relations(self) -> Vec<Relation> {
+        self.0
+    }
+}
+
+pub struct UniformRelations {
+    low: RelationsSample,
+    high: RelationsSample,
+    n: usize,
+    inclusive: bool,
+}
+
+impl UniformSampler for UniformRelations {
+    type X = RelationsSample;
+
+    fn new<B1, B2>(low: B1, high: B2) -> Self
+    where
+        B1: SampleBorrow<Self::X> + Sized,
+        B2: SampleBorrow<Self::X> + Sized,
+    {
+        let low = low.borrow();
+        let high = high.borrow();
+
+        let n = low.0.len();
+        if high.0.len() != n {
+            panic!("low and high must have the same lengths")
+        }
+
+        for i in 0..n {
+            if low.0[i] >= high.0[i] {
+                panic!("low cannot be higher than high");
+            }
+        }
+
+        Self {
+            low: low.clone(),
+            high: high.clone(),
+            n,
+            inclusive: false,
+        }
+    }
+
+    fn new_inclusive<B1, B2>(low: B1, high: B2) -> Self
+    where
+        B1: SampleBorrow<Self::X> + Sized,
+        B2: SampleBorrow<Self::X> + Sized,
+    {
+        let low = low.borrow();
+        let high = high.borrow();
+
+        let n = low.0.len();
+        if high.0.len() != n {
+            panic!("low and high must have the same lengths")
+        }
+
+        for i in 0..n {
+            if low.0[i] > high.0[i] {
+                panic!("low cannot be higher than high");
+            }
+        }
+
+        Self {
+            low: low.clone(),
+            high: high.clone(),
+            n,
+            inclusive: true,
+        }
+    }
+
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Self::X {
+        let mut sample = Vec::with_capacity(self.n);
+        for i in 0..self.n {
+            let low = self.low.0[i];
+            let high = self.high.0[i];
+
+            let sampler = if self.inclusive {
+                Uniform::new_inclusive(low, high)
+            } else {
+                Uniform::new(low, high)
+            };
+
+            sample.push(sampler.sample(rng));
+        }
+        RelationsSample(sample)
+    }
+}
+
+impl SampleUniform for RelationsSample {
+    type Sampler = UniformRelations;
 }
 
 impl fmt::Display for Relation {
@@ -672,7 +773,7 @@ mod tests {
         let low = Relation::new(100, Strictness::Strict);
         let high = Relation::new(1000, Strictness::Strict);
         let sampler = Uniform::new(low, high);
-        for _ in 0..=MAX_LIMIT {
+        for _ in 0..=MAX_LIMIT as usize * 100 {
             let relation = sampler.sample(&mut rng);
             assert!(relation >= low && relation < high);
         }
@@ -684,9 +785,57 @@ mod tests {
         let low = Relation::new(100, Strictness::Strict);
         let high = Relation::new(1000, Strictness::Strict);
         let sampler = Uniform::new_inclusive(low, high);
-        for _ in 0..=MAX_LIMIT {
+        for _ in 0..=MAX_LIMIT as usize * 100 {
             let relation = sampler.sample(&mut rng);
             assert!(relation >= low && relation <= high);
+        }
+    }
+
+    #[test]
+    fn relation_uniform_never_less_than_zero() {
+        let mut rng = rand::thread_rng();
+        let low = ZERO;
+        let high = Relation::new(15, Strictness::Strict);
+        let sampler = Uniform::new_inclusive(low, high);
+        for _ in 0..=MAX_LIMIT as usize * 100 {
+            let relation = sampler.sample(&mut rng);
+            assert!(relation >= ZERO)
+        }
+    }
+
+    #[test]
+    fn relation_uniform_less_than_zero() {
+        let mut rng = rand::thread_rng();
+        let low = Relation::new(0, Strictness::Strict);
+        let high = Relation::new(0, Strictness::Strict);
+        let sampler = Uniform::new_inclusive(low, high);
+        for _ in 0..=MAX_LIMIT as usize * 100 {
+            let relation = sampler.sample(&mut rng);
+            assert!(relation == Relation::new(0, Strictness::Strict))
+        }
+    }
+
+    #[test]
+    fn relation_uniform_zero() {
+        let mut rng = rand::thread_rng();
+        let low = ZERO;
+        let high = ZERO;
+        let sampler = Uniform::new_inclusive(low, high);
+        for _ in 0..=MAX_LIMIT as usize * 100 {
+            let relation = sampler.sample(&mut rng);
+            assert!(relation == ZERO)
+        }
+    }
+
+    #[test]
+    fn relation_uniform_infinity() {
+        let mut rng = rand::thread_rng();
+        let low = INFINITY;
+        let high = INFINITY;
+        let sampler = Uniform::new_inclusive(low, high);
+        for _ in 0..=MAX_LIMIT as usize * 100 {
+            let relation = sampler.sample(&mut rng);
+            assert!(relation == INFINITY)
         }
     }
 }

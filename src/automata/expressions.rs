@@ -21,13 +21,13 @@ impl Display for Binary {
 
 #[derive(Clone)]
 pub enum Unary {
-    Inverse,
+    LogicalNegation,
 }
 
 impl Display for Unary {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Unary::Inverse => write!(f, "¬"),
+            Unary::LogicalNegation => write!(f, "¬"),
         }
     }
 }
@@ -77,7 +77,7 @@ impl Expression {
     }
 
     pub fn not(self) -> Self {
-        Expression::Unary(Unary::Inverse, Box::new(self))
+        Expression::Unary(Unary::LogicalNegation, Box::new(self))
     }
 
     pub fn left_fold_binary(expressions: Vec<Expression>, binary: Binary) -> Expression {
