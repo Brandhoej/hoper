@@ -6,7 +6,7 @@ use petgraph::graph::NodeIndex;
 
 use super::{action::Action, edge::Edge, ioa::IOA, location::Location, ta::TA};
 
-#[derive(Clone, PartialEq)]
+#[derive(PartialEq, Eq, Clone, Hash)]
 pub enum LocationTree {
     Leaf(NodeIndex),
     Branch(Vec<LocationTree>),
@@ -104,7 +104,7 @@ pub trait TIOA
 where
     Self: TA + IOA,
 {
-    fn initial(&self) -> LocationTree;
+    fn initial_location(&self) -> LocationTree;
     fn location(&self, tree: &LocationTree) -> Result<Location, ()>;
     fn outgoing(&self, source: &LocationTree, action: Action) -> Result<Vec<Move>, ()>;
 }

@@ -54,10 +54,10 @@ use super::{
 /// Parallel composition over multiple automata can be extended similarly, as `Aⁱ = (((A¹ ∥ A²) ∥ A³) ...)`.
 pub struct Composition {
     tioas: Vec<Box<Specification>>,
-    inputs: HashSet<Symbol>,
-    outputs: HashSet<Symbol>,
-    unique_actions: Vec<HashSet<Symbol>>,
-    common_actions: HashSet<Symbol>,
+    inputs: HashSet<Action>,
+    outputs: HashSet<Action>,
+    unique_actions: Vec<HashSet<Action>>,
+    common_actions: HashSet<Action>,
 }
 
 impl Composition {
@@ -70,7 +70,7 @@ impl Composition {
         let all_inputs = tiota.iter().map(|tioas| tioas.inputs());
         let all_actions = tiota.iter().map(|tioas| tioas.actions());
 
-        // `Actₒ¹ ∩ Actₒ² = ∅`
+        // `Act¹ₒ ∩ Act²ₒ = ∅`
         if !are_disjoint(&all_outputs) {
             return Err(());
         }
@@ -121,29 +121,34 @@ impl TA for Composition {
 }
 
 impl IOA for Composition {
-    fn inputs(&self) -> HashSet<Symbol> {
+    fn inputs(&self) -> HashSet<Action> {
         self.inputs.clone()
     }
 
-    fn outputs(&self) -> HashSet<Symbol> {
+    fn outputs(&self) -> HashSet<Action> {
         self.outputs.clone()
     }
 }
 
 impl TIOA for Composition {
-    fn initial(&self) -> LocationTree {
-        LocationTree::new_branch(self.tioas.iter().map(|tioa| tioa.initial()).collect())
+    fn initial_location(&self) -> LocationTree {
+        LocationTree::new_branch(
+            self.tioas
+                .iter()
+                .map(|tioa| tioa.initial_location())
+                .collect(),
+        )
     }
 
     fn outgoing(&self, source: &LocationTree, action: Action) -> Result<Vec<Move>, ()> {
-        if !self.actions().contains(&action.letter()) {
+        if !self.actions().contains(&action) {
             return Err(());
         }
 
         if let LocationTree::Branch(sources) = source.clone() {
             // It is a common action between all aggregate systems.
             // Therefore, the transition happens for all simultaneously.
-            if self.common_actions.contains(&action.letter()) {
+            if self.common_actions.contains(&action) {
                 let moves = self
                     .tioas
                     .iter()
@@ -160,7 +165,7 @@ impl TIOA for Composition {
                 // Either the action is unique to the automaton or not.
                 // If it is unique to the automaton then we move from it.
                 // Otherwise, we stay put at the same location as we came from.
-                if !found_unique && self.unique_actions[i].contains(&action.letter()) {
+                if !found_unique && self.unique_actions[i].contains(&action) {
                     found_unique = true;
                     tioas.outgoing(&sources[i], action).unwrap()
                 } else {

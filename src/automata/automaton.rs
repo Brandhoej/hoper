@@ -23,8 +23,8 @@ use super::{
 pub struct Automaton {
     initial: NodeIndex,
     graph: DiGraph<Location, Edge>,
-    inputs: HashSet<Symbol>,
-    outputs: HashSet<Symbol>,
+    inputs: HashSet<Action>,
+    outputs: HashSet<Action>,
 }
 
 impl Automaton {
@@ -34,8 +34,8 @@ impl Automaton {
 
         for edge in graph.edge_weights() {
             match edge.channel() {
-                Channel::In(action) => inputs.insert(*action.letter()),
-                Channel::Out(action) => outputs.insert(*action.letter()),
+                Channel::In(action) => inputs.insert(*action),
+                Channel::Out(action) => outputs.insert(*action),
             };
         }
 
@@ -63,11 +63,11 @@ impl Automaton {
         self.graph.edge_weight(index)
     }
 
-    pub fn inputs(&self) -> impl Iterator<Item = &Symbol> {
+    pub fn inputs(&self) -> impl Iterator<Item = &Action> {
         self.inputs.iter()
     }
 
-    pub fn outputs(&self) -> impl Iterator<Item = &Symbol> {
+    pub fn outputs(&self) -> impl Iterator<Item = &Action> {
         self.outputs.iter()
     }
 
@@ -156,17 +156,17 @@ impl TA for Automaton {
 }
 
 impl IOA for Automaton {
-    fn inputs(&self) -> HashSet<Symbol> {
+    fn inputs(&self) -> HashSet<Action> {
         self.inputs.clone()
     }
 
-    fn outputs(&self) -> HashSet<Symbol> {
+    fn outputs(&self) -> HashSet<Action> {
         self.outputs.clone()
     }
 }
 
 impl TIOA for Automaton {
-    fn initial(&self) -> LocationTree {
+    fn initial_location(&self) -> LocationTree {
         LocationTree::Leaf(self.initial)
     }
 

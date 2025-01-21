@@ -1,5 +1,5 @@
 use crate::zones::{
-    constraint::{Relation, Strictness, REFERENCE},
+    constraint::{Limit, Relation, Strictness, REFERENCE},
     federation::Federation,
 };
 
@@ -48,6 +48,7 @@ impl Extrapolator {
                         let lhs_bool = self.stack.pop().unwrap().boolean().unwrap();
 
                         if !lhs_bool {
+                            self.stack.push(Literal::new_false());
                             return federation.clear();
                         }
 
@@ -55,9 +56,11 @@ impl Extrapolator {
                         let rhs_bool = self.stack.pop().unwrap().boolean().unwrap();
 
                         if !rhs_bool {
+                            self.stack.push(Literal::new_false());
                             return federation.clear();
                         }
 
+                        self.stack.push(Literal::new_true());
                         lhs_federation.intersection(rhs_federation)
                     }
                     Binary::Disjunction => {
@@ -67,6 +70,8 @@ impl Extrapolator {
                         let rhs_federation = self.expression(federation.clone(), &rhs);
                         let rhs_bool = self.stack.pop().unwrap().boolean().unwrap();
 
+                        self.stack.push(Literal::new_boolean(lhs_bool || rhs_bool));
+
                         if lhs_bool && rhs_bool {
                             lhs_federation.union(rhs_federation);
                             return lhs_federation;
@@ -74,8 +79,9 @@ impl Extrapolator {
                             return lhs_federation;
                         } else if rhs_bool {
                             return rhs_federation;
+                        } else {
+                            federation.clear()
                         }
-                        federation.clear()
                     }
                 }
             }
@@ -84,40 +90,61 @@ impl Extrapolator {
                 self.stack.push(value.clone());
                 federation
             }
-            Expression::ClockConstraint(clock, comparison, limit) => match comparison {
-                Comparison::LessThanOrEqual => {
-                    federation.tighten_upper(*clock, Relation::new(*limit, Strictness::Weak))
+            Expression::ClockConstraint(operand, comparison, limit) => {
+                federation = self.expression(federation, &operand);
+                let clock = self.stack.pop().unwrap().clock().unwrap();
+
+                federation = self.expression(federation, &limit);
+                let limit_literal = self.stack.pop().unwrap().i16().unwrap();
+
+                match comparison {
+                    Comparison::LessThanOrEqual => federation
+                        .tighten_upper(clock, Relation::new(limit_literal, Strictness::Weak)),
+                    Comparison::LessThan => federation
+                        .tighten_upper(clock, Relation::new(limit_literal, Strictness::Strict)),
+                    Comparison::Equal => federation.tighten_limit(clock, REFERENCE, limit_literal),
+                    Comparison::GreaterThanOrEqual => federation
+                        .tighten_lower(clock, Relation::new(limit_literal, Strictness::Weak)),
+                    Comparison::GreaterThan => federation
+                        .tighten_lower(clock, Relation::new(limit_literal, Strictness::Strict)),
                 }
-                Comparison::LessThan => {
-                    federation.tighten_upper(*clock, Relation::new(*limit, Strictness::Strict))
+            }
+            Expression::DiagonalClockConstraint(minuend, subtrahend, comparison, limit) => {
+                federation = self.expression(federation, &minuend);
+                let minuend_clock = self.stack.pop().unwrap().clock().unwrap();
+
+                federation = self.expression(federation, &subtrahend);
+                let subtrahend_clock = self.stack.pop().unwrap().clock().unwrap();
+
+                federation = self.expression(federation, &limit);
+                let limit_literal = self.stack.pop().unwrap().i16().unwrap();
+
+                match comparison {
+                    Comparison::LessThanOrEqual => federation.tighten_relation(
+                        minuend_clock,
+                        subtrahend_clock,
+                        Relation::new(limit_literal, Strictness::Weak),
+                    ),
+                    Comparison::LessThan => federation.tighten_relation(
+                        minuend_clock,
+                        subtrahend_clock,
+                        Relation::new(limit_literal, Strictness::Strict),
+                    ),
+                    Comparison::Equal => {
+                        federation.tighten_limit(minuend_clock, subtrahend_clock, limit_literal)
+                    }
+                    Comparison::GreaterThanOrEqual => federation.tighten_relation(
+                        subtrahend_clock,
+                        minuend_clock,
+                        Relation::new(limit_literal, Strictness::Weak),
+                    ),
+                    Comparison::GreaterThan => federation.tighten_relation(
+                        subtrahend_clock,
+                        minuend_clock,
+                        Relation::new(limit_literal, Strictness::Strict),
+                    ),
                 }
-                Comparison::Equal => federation.tighten_limit(*clock, REFERENCE, *limit),
-                Comparison::GreaterThanOrEqual => {
-                    federation.tighten_lower(*clock, Relation::new(*limit, Strictness::Weak))
-                }
-                Comparison::GreaterThan => {
-                    federation.tighten_lower(*clock, Relation::new(*limit, Strictness::Strict))
-                }
-            },
-            Expression::DiagonalClockConstraint(lhs, rhs, comparison, limit) => match comparison {
-                Comparison::LessThanOrEqual => {
-                    federation.tighten_relation(*lhs, *rhs, Relation::new(*limit, Strictness::Weak))
-                }
-                Comparison::LessThan => federation.tighten_relation(
-                    *lhs,
-                    *rhs,
-                    Relation::new(*limit, Strictness::Strict),
-                ),
-                Comparison::Equal => federation.tighten_limit(*lhs, *rhs, *limit),
-                Comparison::GreaterThanOrEqual => {
-                    federation.tighten_relation(*rhs, *lhs, Relation::new(*limit, Strictness::Weak))
-                }
-                Comparison::GreaterThan => federation.tighten_relation(
-                    *rhs,
-                    *lhs,
-                    Relation::new(*limit, Strictness::Strict),
-                ),
-            },
+            }
         }
     }
 
@@ -130,5 +157,13 @@ impl Extrapolator {
             }
             Statement::Expression(expression) => self.expression(federation, expression),
         }
+    }
+
+    pub fn extrapolate_expression(federation: Federation, expression: &Expression) -> Federation {
+        Extrapolator::empty().expression(federation, expression)
+    }
+
+    pub fn extrapolate_statement(federation: Federation, statement: &Statement) -> Federation {
+        Extrapolator::empty().statement(federation, statement)
     }
 }

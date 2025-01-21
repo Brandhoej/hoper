@@ -1,11 +1,11 @@
 use std::collections::HashSet;
 
-use symbol_table::Symbol;
+use super::action::Action;
 
 pub trait IOA {
-    fn inputs(&self) -> HashSet<Symbol>;
-    fn outputs(&self) -> HashSet<Symbol>;
-    fn actions(&self) -> HashSet<Symbol> {
+    fn inputs(&self) -> HashSet<Action>;
+    fn outputs(&self) -> HashSet<Action>;
+    fn actions(&self) -> HashSet<Action> {
         let mut actions = self.inputs();
         actions.extend(self.outputs());
         actions

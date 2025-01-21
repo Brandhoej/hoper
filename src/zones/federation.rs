@@ -85,10 +85,34 @@ impl Federation {
     }
 
     #[inline]
+    pub fn map_mut<F>(self, f: F) -> Self
+    where
+        F: FnMut(DBM<Canonical>) -> DBM<Canonical>,
+    {
+        return Self::new(self.clocks(), self.dbms.into_iter().map(f).collect());
+    }
+
+    #[inline]
     pub fn tighten_relation(self, i: Clock, j: Clock, relation: Relation) -> Self {
         self.filter_map_mut(move |dbm| match dbm.tighten(i, j, relation) {
             Ok(dbm) => Some(dbm),
             Err(_) => None,
+        })
+    }
+
+    #[inline]
+    pub fn up(self) -> Self {
+        self.map_mut(|mut dbm| {
+            dbm.up();
+            dbm
+        })
+    }
+
+    #[inline]
+    pub fn down(self) -> Self {
+        self.map_mut(|mut dbm| {
+            dbm.down();
+            dbm
         })
     }
 
@@ -112,6 +136,11 @@ impl Federation {
     #[inline]
     pub fn tighten_lower(self, clock: Clock, relation: Relation) -> Self {
         self.tighten_relation(REFERENCE, clock, relation)
+    }
+
+    #[inline]
+    pub fn is_subset(&self, other: &Self) -> bool {
+        self.clone().subtraction(other).is_empty()
     }
 
     pub fn fmt_disjunctions(&self, labels: &Vec<&str>) -> String {
@@ -213,7 +242,7 @@ impl Federation {
         difference
     }
 
-    pub fn subtraction(mut self, other: Self) -> Self {
+    pub fn subtraction(mut self, other: &Self) -> Self {
         // This is like subtracting nothing which does nothing.
         if other.is_empty() {
             return self;
@@ -222,7 +251,7 @@ impl Federation {
         // When subtracting from nothing we get the inverse
         // of what we are trying to subtract.
         if self.is_empty() {
-            return other.inverse();
+            return other.clone().inverse();
         }
 
         // If both are not empty. Then we subtract each DBM in other.
@@ -234,6 +263,6 @@ impl Federation {
     }
 
     pub fn inverse(self) -> Self {
-        Self::universe(self.clocks()).subtraction(self)
+        Self::universe(self.clocks()).subtraction(&self)
     }
 }

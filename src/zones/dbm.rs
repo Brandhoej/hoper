@@ -1,16 +1,6 @@
 use std::ops::{Index, IndexMut};
 
 use bitset::BitSet;
-use rand::{
-    distributions::{
-        uniform::{SampleBorrow, SampleUniform, UniformSampler},
-        Uniform,
-    },
-    prelude::Distribution,
-    Rng,
-};
-
-use crate::zones::constraint::UniformRelations;
 
 use super::constraint::{Clock, Limit, Relation, Strictness, INFINITY, REFERENCE, ZERO};
 
@@ -21,7 +11,7 @@ pub struct DBM<State: DBMState> {
     /// The number of clocks inside the DBM.
     clocks: Clock,
     /// The relations across the clocks.
-    relations: Vec<Relation>,
+    relations: Box<[Relation]>, // Q: Would SmallVec be appropriate here?
     /// The internal state important for the current type of DBM.
     state: State,
 }
@@ -35,7 +25,7 @@ impl<State: DBMState> DBM<State> {
         (self.clocks() * self.clocks()) as usize
     }
 
-    pub fn relations(&self) -> &Vec<Relation> {
+    pub fn relations(&self) -> &Box<[Relation]> {
         &self.relations
     }
 
@@ -215,7 +205,7 @@ impl DBM<Canonical> {
         let dimension: u16 = clocks + 1;
         Self {
             clocks: dimension,
-            relations: vec![ZERO; (dimension * dimension) as usize],
+            relations: vec![ZERO; (dimension * dimension) as usize].into_boxed_slice(),
             state: Canonical {},
         }
     }
@@ -225,7 +215,7 @@ impl DBM<Canonical> {
         let dimension: u16 = clocks + 1;
         let mut dbm = Self {
             clocks: dimension,
-            relations: vec![INFINITY; (dimension * dimension) as usize],
+            relations: vec![INFINITY; (dimension * dimension) as usize].into_boxed_slice(),
             state: Canonical {},
         };
 
@@ -260,6 +250,24 @@ impl DBM<Canonical> {
         }
 
         return (subset, superset);
+    }
+
+    /// Returns true if self is a subset of other.
+    pub fn is_subset(&self, other: &Self) -> bool {
+        let (subset, _) = self.relation(other);
+        subset
+    }
+
+    /// Returns true if self is a superset of other.
+    pub fn is_superset(&self, other: &Self) -> bool {
+        let (_, superset) = self.relation(other);
+        superset
+    }
+
+    /// Returns true if all valuations of self are also in other.
+    pub fn is_eq(&self, other: &Self) -> bool {
+        let (subset, superset) = self.relation(other);
+        subset && superset
     }
 
     /// Returns true if all clocks' upper bound is infinity.
@@ -676,7 +684,7 @@ impl DBM<Canonical> {
         for i in 0..dbm.clocks() {
             for j in 0..dbm.clocks() {
                 if !dbm[(i, j)].is_infinity() {
-                    dbm[(i, j)] = dbm[(i, j)] + expansion
+                    dbm[(i, j)] += expansion
                 };
             }
         }
@@ -684,10 +692,12 @@ impl DBM<Canonical> {
         for i in 0..dbm.clocks() {
             // Restore reflexive constraints.
             dbm[(i, i)] = ZERO;
+            dbm[(0, i)] = ZERO;
 
+            /* I dont know if "dbm[(0, i)] = ZERO" is a correct replacement.
             if dbm[(0, i)] > ZERO {
                 dbm[(0, i)] = ZERO;
-            }
+            }*/
         }
 
         dbm.clean().ok().unwrap()
@@ -725,7 +735,7 @@ impl Dirty {
 }
 
 impl DBM<Dirty> {
-    pub fn from_relations(relations: Vec<Relation>) -> Result<DBM<Dirty>, ()> {
+    pub fn from_relations(relations: Box<[Relation]>) -> Result<DBM<Dirty>, ()> {
         let mut clocks: usize = 0;
         while clocks * clocks < relations.len() {
             clocks += 1;
@@ -847,102 +857,125 @@ mod tests {
     }
 
     #[test]
-    fn sample_between_zero_and_universe() {
+    fn dmb1_relation() {
+        let dbm = dbm1();
+        let (subset, superset) = dbm.relation(&dbm);
+        assert!(subset);
+        assert!(superset);
+    }
+
+    #[test]
+    fn dmb2_relation() {
+        let dbm = dbm2();
+        let (subset, superset) = dbm.relation(&dbm);
+        assert!(subset);
+        assert!(superset);
+    }
+
+    #[test]
+    fn dmb3_relation() {
+        let dbm = dbm3();
+        let (subset, superset) = dbm.relation(&dbm);
+        assert!(subset);
+        assert!(superset);
+    }
+
+    #[test]
+    fn dmb4_relation() {
+        let dbm = dbm4();
+        let (subset, superset) = dbm.relation(&dbm);
+        assert!(subset);
+        assert!(superset);
+    }
+
+    #[test]
+    fn dmb1_expanded_relation() {
+        let dbm = dbm1();
+        let expanded = dbm.clone().expand(Relation::new(10, Strictness::Weak));
+        let (subset, superset) = dbm.relation(&expanded);
+        let (r_subset, r_superset) = expanded.relation(&dbm);
+        assert!(subset);
+        assert!(!superset);
+        assert!(!r_subset);
+        assert!(r_superset);
+    }
+
+    #[test]
+    fn dmb2_expanded_relation() {
+        let dbm = dbm2();
+        let expanded = dbm.clone().expand(Relation::new(10, Strictness::Weak));
+        let (subset, superset) = dbm.relation(&expanded);
+        let (r_subset, r_superset) = expanded.relation(&dbm);
+        assert!(subset);
+        assert!(!superset);
+        assert!(!r_subset);
+        assert!(r_superset);
+    }
+
+    #[test]
+    fn dmb3_expanded_relation() {
+        let dbm = dbm3();
+        let expanded = dbm.clone().expand(Relation::new(10, Strictness::Weak));
+        let (subset, superset) = dbm.relation(&expanded);
+        let (r_subset, r_superset) = expanded.relation(&dbm);
+        assert!(subset);
+        assert!(!superset);
+        assert!(!r_subset);
+        assert!(r_superset);
+    }
+
+    #[test]
+    fn dmb4_expanded_relation() {
+        let dbm = dbm4();
+        let expanded = dbm.clone().expand(Relation::new(10, Strictness::Weak));
+        let (subset, superset) = dbm.relation(&expanded);
+        let (r_subset, r_superset) = expanded.relation(&dbm);
+        assert!(subset);
+        assert!(!superset);
+        assert!(!r_subset);
+        assert!(r_superset);
+    }
+
+    #[test]
+    fn sample_between_zero_and_a_bit_larger() {
         let low = DBM::zero(2);
         let high = low.clone().expand(Relation::new(16, Strictness::Weak));
 
         let mut rng = rand::thread_rng();
         let sampler = UniformRelations::new_inclusive(
-            RelationsSample::new(low.relations().clone()),
-            RelationsSample::new(high.relations().clone()),
+            RelationsSample::new(low.relations().clone().into()),
+            RelationsSample::new(high.relations().clone().into()),
         );
 
         for _ in 0..=10000 {
             let sample = sampler.sample(&mut rng);
-            let dbm = DBM::<Dirty>::from_relations(sample.relations()).unwrap();
+            let dbm = DBM::<Dirty>::from_relations(sample.relations().into()).unwrap();
             assert!(dbm.clean().is_ok())
         }
     }
 
     #[test]
-    fn fmt_dbm1() {
-        let dbm = dbm1();
-        println!("{}", dbm.fmt_conjunctions(&vec!["x", "y"]));
-        println!("{}", dbm.fmt_minimal_graphviz_digraph(&vec!["0", "x", "y"]));
-        assert!(false);
+    fn dbm1_subtraction_with_universe() {
+        let dbm1 = dbm1();
+        let universe = DBM::universe(2);
+        let subtractions = universe.subtraction(&dbm1);
+        assert_eq!(4, subtractions.len());
     }
 
     #[test]
-    fn fmt_dbm2() {
-        let dbm = dbm2();
-        println!("{}", dbm.fmt_conjunctions(&vec!["x", "y"]));
-        println!("{}", dbm.fmt_minimal_graphviz_digraph(&vec!["0", "x", "y"]));
-        assert!(false);
-    }
-
-    #[test]
-    fn fmt_dbm3() {
-        let dbm = dbm3();
-        println!("{}", dbm.fmt_conjunctions(&vec!["x", "y"]));
-        println!("{}", dbm.fmt_minimal_graphviz_digraph(&vec!["0", "x", "y"]));
-        assert!(false);
-    }
-
-    #[test]
-    fn fmt_dbm4() {
-        let dbm = dbm4();
-        println!("{}", dbm.fmt_conjunctions(&vec!["x", "y"]));
-        println!("{}", dbm.fmt_minimal_graphviz_digraph(&vec!["0", "x", "y"]));
-        assert!(false);
-    }
-
-    #[test]
-    fn fmt_dbm2_intersection_with_dbm3() {
+    fn dbm2_intersection_with_dbm3() {
         let dmb2 = dbm2();
         let dbm3 = dbm3();
         assert!(dmb2.maybe_intersects(&dbm3));
         assert!(dmb2.clone().intersection(&dbm3).is_some());
-        let intersection = dmb2.intersection(&dbm3).unwrap();
-        println!("{}", intersection.fmt_conjunctions(&vec!["x", "y"]));
-        println!(
-            "{}",
-            intersection.fmt_minimal_graphviz_digraph(&vec!["0", "x", "y"])
-        );
-        /*let intersection = dmb2.intersection(&dbm3).unwrap();
-        println!("{}", intersection.fmt_conjunctions(&vec!["x", "y"]));
-        println!("{}", intersection.fmt_minimal_graphviz_digraph(&vec!["0", "x", "y"]));
-        assert!(false);*/
     }
 
     #[test]
-    fn fmt_dbm1_subtraction_with_universe() {
-        let dbm1 = dbm1();
-        let universe = DBM::universe(2);
-        let subtractions = universe.subtraction(&dbm1);
-        // assert_eq!(4, subtractions.len());
-        println!("{}", subtractions[0].fmt_conjunctions(&vec!["x", "y"]));
-        println!("{}", subtractions[1].fmt_conjunctions(&vec!["x", "y"]));
-        println!("{}", subtractions[2].fmt_conjunctions(&vec!["x", "y"]));
-    }
-
-    #[test]
-    fn fmt_dbm4_subtraction_with_universe() {
+    fn dbm4_subtraction_with_universe() {
         let dbm4 = dbm4();
         let universe = DBM::universe(2);
         let subtractions = universe.subtraction(&dbm4);
-        // assert_eq!(4, subtractions.len());
-        println!("{}", subtractions[0].fmt_conjunctions(&vec!["x", "y"]));
-        println!("{}", subtractions[1].fmt_conjunctions(&vec!["x", "y"]));
-        println!("{}", subtractions[2].fmt_conjunctions(&vec!["x", "y"]));
-    }
-
-    #[test]
-    fn fmt_dmb1_subtraction_with_dbm4() {
-        let dbm1 = dbm1();
-        let dbm4 = dbm4();
-        let subtractions = dbm1.subtraction(&dbm4);
-        assert_eq!(1, subtractions.len());
-        println!("{}", subtractions[0].fmt_conjunctions(&vec!["x", "y"]));
+        assert_eq!(2, subtractions.len());
     }
 
     #[test]

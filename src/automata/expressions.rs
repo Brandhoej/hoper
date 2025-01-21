@@ -1,7 +1,5 @@
 use std::fmt::{self, Display};
 
-use crate::zones::constraint::{Clock, Limit};
-
 use super::literal::Literal;
 
 #[derive(Clone)]
@@ -59,8 +57,13 @@ pub enum Expression {
     Binary(Box<Expression>, Binary, Box<Expression>),
     Group(Box<Expression>),
     Literal(Literal),
-    ClockConstraint(Clock, Comparison, Limit),
-    DiagonalClockConstraint(Clock, Clock, Comparison, Limit),
+    ClockConstraint(Box<Expression>, Comparison, Box<Expression>),
+    DiagonalClockConstraint(
+        Box<Expression>,
+        Box<Expression>,
+        Comparison,
+        Box<Expression>,
+    ),
 }
 
 impl Expression {
@@ -142,6 +145,8 @@ impl Display for Expression {
             Expression::Group(expression) => write!(f, "({})", expression),
             Expression::Literal(value) => match value {
                 Literal::Boolean(value) => write!(f, "{}", *value),
+                Literal::Clock(clock) => write!(f, "{}", *clock),
+                Literal::I16(value) => write!(f, "{}", *value),
             },
             Expression::ClockConstraint(operand, comparison, bound) => {
                 write!(f, "{} {} {}", *operand, comparison, bound)

@@ -1,7 +1,7 @@
 use std::{
     cmp::Ordering,
     fmt,
-    ops::{Add, Sub},
+    ops::{Add, AddAssign, Sub, SubAssign},
     u16, usize,
 };
 
@@ -151,7 +151,7 @@ pub type Limit = i16;
 /// relation between two clocks (c0 - c1 RELATION). This encoding uses
 /// the least significant bit to represent the strictness and the other
 /// bits as the limit. The encoding is [limit] [1 bit strictness].
-#[derive(PartialEq, Debug, Clone, Copy)]
+#[derive(PartialEq, Eq, Debug, Clone, Copy)]
 pub struct Relation(Limit);
 
 /// The minimum possible limit the relation supports is an i15 minimum equivalent.
@@ -258,6 +258,18 @@ impl Relation {
     }
 }
 
+impl Ord for Relation {
+    fn cmp(&self, other: &Self) -> Ordering {
+        if self < other {
+            Ordering::Less
+        } else if self == other {
+            Ordering::Equal
+        } else {
+            Ordering::Greater
+        }
+    }
+}
+
 impl Add for Relation {
     type Output = Relation;
 
@@ -266,11 +278,23 @@ impl Add for Relation {
     }
 }
 
+impl AddAssign for Relation {
+    fn add_assign(&mut self, rhs: Self) {
+        *self = *self + rhs
+    }
+}
+
 impl Sub for Relation {
     type Output = Relation;
 
     fn sub(self, rhs: Self) -> Self::Output {
         self.subtract(&rhs)
+    }
+}
+
+impl SubAssign for Relation {
+    fn sub_assign(&mut self, rhs: Self) {
+        *self = *self - rhs
     }
 }
 
@@ -384,6 +408,18 @@ impl RelationsSample {
 
     pub fn relations(self) -> Vec<Relation> {
         self.0
+    }
+}
+
+impl From<Box<[Relation]>> for RelationsSample {
+    fn from(value: Box<[Relation]>) -> Self {
+        Self::new(value.into_vec())
+    }
+}
+
+impl From<RelationsSample> for Box<[Relation]> {
+    fn from(value: RelationsSample) -> Self {
+        value.0.into_boxed_slice()
     }
 }
 

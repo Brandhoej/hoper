@@ -1,5 +1,7 @@
 use std::collections::HashSet;
 
+use symbol_table::Symbol;
+
 use crate::zones::constraint::Clock;
 
 use super::{
@@ -25,18 +27,18 @@ impl TA for Specification {
 }
 
 impl IOA for Specification {
-    fn inputs(&self) -> HashSet<symbol_table::Symbol> {
+    fn inputs(&self) -> HashSet<Action> {
         self.0.inputs()
     }
 
-    fn outputs(&self) -> HashSet<symbol_table::Symbol> {
+    fn outputs(&self) -> HashSet<Action> {
         self.0.outputs()
     }
 }
 
 impl TIOA for Specification {
-    fn initial(&self) -> LocationTree {
-        self.0.initial()
+    fn initial_location(&self) -> LocationTree {
+        self.0.initial_location()
     }
 
     fn outgoing(&self, source: &LocationTree, action: Action) -> Result<Vec<Move>, ()> {
@@ -44,7 +46,7 @@ impl TIOA for Specification {
     }
 
     fn location(&self, tree: &LocationTree) -> Result<Location, ()> {
-        todo!()
+        self.0.location(tree)
     }
 }
 

@@ -4,7 +4,7 @@ use symbol_table::Symbol;
 /// Inherently these are not partitioned in input/outputs instead
 /// the actions allows for the same letter to be used in multiple
 /// channel instances whilst still being uniquely identifiable.
-#[derive(PartialEq, Clone, Copy, Debug)]
+#[derive(PartialEq, Eq, Hash, Clone, Copy, Debug)]
 pub struct Action {
     letter: Symbol,
 }
