@@ -1,7 +1,7 @@
 use crate::zones::federation::Federation;
 
 use super::{
-    action::{self, Action},
+    action::Action,
     extrapolator::Extrapolator,
     ioa::IOA,
     ta::TA,

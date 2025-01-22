@@ -156,6 +156,7 @@ impl Extrapolator {
                 })
             }
             Statement::Expression(expression) => self.expression(federation, expression),
+            Statement::FreeClock(clock) => federation.free(*clock),
         }
     }
 

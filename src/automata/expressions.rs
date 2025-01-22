@@ -1,5 +1,7 @@
 use std::fmt::{self, Display};
 
+use crate::zones::constraint::Clock;
+
 use super::literal::Literal;
 
 #[derive(Clone)]
@@ -67,16 +69,8 @@ pub enum Expression {
 }
 
 impl Expression {
-    pub const fn boolean(value: bool) -> Self {
-        Self::Literal(Literal::new_boolean(value))
-    }
-
-    pub const fn new_true() -> Self {
-        Self::Literal(Literal::new_true())
-    }
-
-    pub const fn new_false() -> Self {
-        Self::Literal(Literal::new_false())
+    pub fn new_clock_constraint(operand: Self, comparison: Comparison, limit: Expression) -> Self {
+        Self::ClockConstraint(Box::new(operand), comparison, Box::new(limit))
     }
 
     pub fn not(self) -> Self {
@@ -85,7 +79,7 @@ impl Expression {
 
     pub fn left_fold_binary(expressions: Vec<Expression>, binary: Binary) -> Expression {
         if expressions.is_empty() {
-            return Self::new_true();
+            panic!()
         }
 
         if expressions.len() == 1 {
@@ -132,8 +126,8 @@ impl Expression {
 }
 
 impl From<Literal> for Expression {
-    fn from(value: Literal) -> Self {
-        Expression::Literal(value)
+    fn from(literal: Literal) -> Self {
+        Self::Literal(literal)
     }
 }
 

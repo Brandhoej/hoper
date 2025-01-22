@@ -7,40 +7,45 @@ use super::{
 
 #[derive(Clone)]
 pub struct Federation {
-    clocks: Clock,
     dbms: Vec<DBM<Canonical>>,
 }
 
 impl Federation {
     #[inline]
-    pub fn new(clocks: Clock, dbms: Vec<DBM<Canonical>>) -> Federation {
-        for dbm in dbms.iter() {
-            if dbm.clocks() != clocks {
-                panic!("inconsistent dimension between federation and DBM")
+    pub fn new(dbms: Vec<DBM<Canonical>>) -> Federation {
+        let mut iterator = dbms.iter();
+        if let Some(first) = iterator.next() {
+            for dbm in iterator {
+                if dbm.clocks() != first.clocks() {
+                    panic!("inconsistent dimension between federation and DBM")
+                }
             }
         }
 
-        Federation { clocks, dbms }
+        Federation { dbms }
     }
 
     #[inline]
     pub fn zero(clocks: Clock) -> Self {
-        Self::new(clocks, vec![DBM::zero(clocks)])
+        Self::new(vec![DBM::zero(clocks)])
     }
 
     #[inline]
     pub fn universe(clocks: Clock) -> Federation {
-        Federation::new(clocks, vec![DBM::universe(clocks)])
+        Federation::new(vec![DBM::universe(clocks)])
     }
 
     #[inline]
     pub fn empty(clocks: Clock) -> Federation {
-        Federation::new(clocks, vec![])
+        Federation::new(vec![])
     }
 
     #[inline]
-    pub const fn clocks(&self) -> Clock {
-        self.clocks
+    pub fn clocks(&self) -> Option<Clock> {
+        match self.dbms.first() {
+            Some(dbm) => Some(dbm.clocks()),
+            None => None,
+        }
     }
 
     #[inline]
@@ -55,9 +60,12 @@ impl Federation {
 
     #[inline]
     pub fn append(&mut self, dbm: DBM<Canonical>) {
-        if dbm.clocks() != self.clocks() {
-            panic!("inconsistent clocks in federation and dbm");
+        if let Some(clocks) = self.clocks() {
+            if clocks == dbm.clocks() {
+                panic!("inconsistent clocks in federation and dbm");
+            }
         }
+
         self.dbms.push(dbm);
     }
 
@@ -81,7 +89,7 @@ impl Federation {
     where
         F: FnMut(DBM<Canonical>) -> Option<DBM<Canonical>>,
     {
-        return Self::new(self.clocks(), self.dbms.into_iter().filter_map(f).collect());
+        return Self::new(self.dbms.into_iter().filter_map(f).collect());
     }
 
     #[inline]
@@ -89,7 +97,7 @@ impl Federation {
     where
         F: FnMut(DBM<Canonical>) -> DBM<Canonical>,
     {
-        return Self::new(self.clocks(), self.dbms.into_iter().map(f).collect());
+        return Self::new(self.dbms.into_iter().map(f).collect());
     }
 
     #[inline]
@@ -143,6 +151,38 @@ impl Federation {
         self.clone().subtraction(other).is_empty()
     }
 
+    #[inline]
+    pub fn free(self, clock: Clock) -> Self {
+        self.map_mut(|mut dbm| {
+            dbm.free(clock);
+            dbm
+        })
+    }
+
+    #[inline]
+    pub fn reset(self, clock: Clock, limit: Limit) -> Self {
+        self.map_mut(|mut dbm| {
+            dbm.reset(clock, limit);
+            dbm
+        })
+    }
+
+    #[inline]
+    pub fn copy(self, lhs: Clock, rhs: Clock) -> Self {
+        self.map_mut(|mut dbm| {
+            dbm.copy(lhs, rhs);
+            dbm
+        })
+    }
+
+    #[inline]
+    pub fn shift(self, clock: Clock, limit: Limit) -> Self {
+        self.map_mut(|mut dbm| {
+            dbm.shift(clock, limit);
+            dbm
+        })
+    }
+
     pub fn fmt_disjunctions(&self, labels: &Vec<&str>) -> String {
         let mut disjunctions: Vec<String> = Vec::new();
 
@@ -180,12 +220,12 @@ impl Federation {
     }
 
     pub fn union(&mut self, other: Self) {
-        if self.clocks() != other.clocks() {
-            panic!("inconsistent clocks between federations")
-        }
-
         if self.is_empty() {
             return;
+        }
+
+        if self.clocks() != other.clocks() {
+            panic!("inconsistent clocks between federations")
         }
 
         for dbm in other.dbms {
@@ -197,7 +237,7 @@ impl Federation {
     }
 
     pub fn intersect(self, operand: &DBM<Canonical>) -> Self {
-        let mut intersection = Self::new(self.clocks(), Vec::with_capacity(self.dbms.len()));
+        let mut intersection = Self::new(Vec::with_capacity(self.dbms.len()));
 
         for dbm in self.dbms {
             match dbm.intersection(operand) {
@@ -222,12 +262,14 @@ impl Federation {
     }
 
     pub fn subtract(self, minued: &DBM<Canonical>) -> Self {
-        if self.clocks() != minued.clocks() {
-            panic!("inconsistent number of clocks in federation and DBM")
+        if let Some(clocks) = self.clocks() {
+            if clocks != minued.clocks() {
+                panic!("inconsistent number of clocks in federation and DBM")
+            }
         }
 
         // We assume that the difference after subtraction has doubled.
-        let mut difference = Self::new(self.clocks(), Vec::with_capacity(self.dbms.len() * 2));
+        let mut difference = Self::new(Vec::with_capacity(self.dbms.len() * 2));
 
         for dbm in self.dbms {
             // No subtraction is guarateed to happen so jsut push the original dbm.
@@ -236,7 +278,7 @@ impl Federation {
                 continue;
             }
 
-            difference.union(Self::new(difference.clocks(), dbm.subtraction(&minued)));
+            difference.union(Self::new(dbm.subtraction(&minued)));
         }
 
         difference
@@ -263,6 +305,6 @@ impl Federation {
     }
 
     pub fn inverse(self) -> Self {
-        Self::universe(self.clocks()).subtraction(&self)
+        Self::universe(self.clocks().unwrap()).subtraction(&self)
     }
 }

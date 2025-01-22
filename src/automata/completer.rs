@@ -6,6 +6,6 @@ pub trait Completer {
 
 impl Completer for Automaton {
     fn complete(self) -> Box<Specification> {
-        todo!()
+        Box::new(Specification::new(self))
     }
 }

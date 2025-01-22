@@ -1,6 +1,6 @@
 use symbol_table::Symbol;
 
-use super::{expressions::Expression, statements::Statement};
+use super::{expressions::Expression, literal::Literal, statements::Statement};
 
 #[derive(Clone)]
 pub enum Location {
@@ -25,8 +25,8 @@ impl Location {
         todo!()
     }
 
-    pub const fn with_name(name: Symbol) -> Self {
-        Self::new(name, Expression::new_true(), Statement::empty())
+    pub fn with_name(name: Symbol) -> Self {
+        Self::new(name, Literal::new_true().into(), Statement::empty())
     }
 
     pub const fn name(&self) -> Option<&Symbol> {

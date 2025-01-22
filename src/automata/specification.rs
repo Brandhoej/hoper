@@ -1,7 +1,5 @@
 use std::collections::HashSet;
 
-use symbol_table::Symbol;
-
 use crate::zones::constraint::Clock;
 
 use super::{
@@ -18,7 +16,13 @@ use super::{
 /// Intuitively it makes sense that a specification must be input-enabled
 /// because any system specification should allow any interaction.
 /// However, this interaction can lead to an inconsistent state.
-pub struct Specification(dyn TIOA);
+pub struct Specification(Box<dyn TIOA>);
+
+impl Specification {
+    pub fn new<T: TIOA + 'static>(tioa: T) -> Self {
+        Specification(Box::new(tioa))
+    }
+}
 
 impl TA for Specification {
     fn clocks(&self) -> Clock {
@@ -56,8 +60,8 @@ mod tests {
     use symbol_table::SymbolTable;
 
     use crate::automata::{
-        action::Action, automaton::Automaton, completer::Completer, edge::Edge,
-        expressions::Expression, location::Location, statements::Statement,
+        action::Action, automaton::Automaton, completer::Completer, edge::Edge, literal::Literal,
+        location::Location, statements::Statement,
     };
 
     #[test]
@@ -74,7 +78,7 @@ mod tests {
             node_b,
             Edge::new_input(
                 Action::new(symbol_input),
-                Expression::new_true(),
+                Literal::new_true().into(),
                 Statement::empty(),
             ),
         );

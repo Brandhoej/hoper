@@ -1,8 +1,10 @@
 pub mod action;
 pub mod automaton;
+pub mod automaton_builder;
 pub mod channel;
 pub mod completer;
 pub mod composition;
+pub mod ecdar_university_test;
 pub mod edge;
 pub mod expressions;
 pub mod extrapolator;

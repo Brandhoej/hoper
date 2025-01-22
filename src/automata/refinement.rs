@@ -7,6 +7,7 @@ use super::{
     tioa::LocationTree, tiots::State,
 };
 
+#[derive(Clone)]
 pub struct RefinementStatePair {
     implementation: LocationTree,
     specification: LocationTree,
@@ -45,7 +46,6 @@ impl RefinementStatePair {
             return Err(());
         }
 
-
         if !implementation_federation.is_subset(&specification_federation) {
             return Err(());
         }
@@ -76,6 +76,15 @@ impl RefinementStatePair {
 
     pub fn specification_state(&self) -> State {
         State::new(self.specification.clone(), self.federation.clone())
+    }
+}
+
+impl From<RefinementStatePair> for State {
+    fn from(value: RefinementStatePair) -> Self {
+        Self::new(
+            LocationTree::new_branch(vec![value.implementation, value.specification]),
+            value.federation,
+        )
     }
 }
 
@@ -167,6 +176,7 @@ impl Refinement {
     }
 
     pub fn refines(&self) -> bool {
+        let mut passed: StateSet = StateSet::new();
         let mut worklist: VecDeque<RefinementStatePair> = VecDeque::new();
 
         // (qᔆ₀, qᵀ₀) ∈ R
@@ -269,7 +279,7 @@ impl Refinement {
 
             // Rule 4 (Unique implementation outputs): Only the implementation can produce the output.
             // Whenever s -o!->ᔆ s' for some s' ∈ Qᔆ and o! ∈ Actᵀₒ \ Actᔆₒ, then (s', t) ∈ R.
-            for output in self.common_outputs.iter() {
+            for output in self.unique_implementation_outputs.iter() {
                 let mut implementation_states = self
                     .implementation
                     .states_from(pair.implementation_state(), *output)
@@ -286,10 +296,23 @@ impl Refinement {
                 ));
             }
 
-            for (implementation_states, specification_states) in states {
-                for implementation_state in dyn_clone::clone_box(&implementation_states) {
-                    for specification_state in dyn_clone::clone_box(&specification_states) {
+            for (implementation_states_iter, specification_states_iter) in states {
+                let specification_states: Vec<State> = specification_states_iter.collect();
 
+                for implementation_state in implementation_states_iter {
+                    for specification_state in specification_states.iter() {
+                        match RefinementStatePair::from_states(
+                            implementation_state.clone(),
+                            specification_state.clone(),
+                        ) {
+                            Ok(state) => {
+                                if !passed.contains(state.clone().into()) {
+                                    passed.insert(state.clone().into());
+                                    worklist.push_back(state);
+                                }
+                            }
+                            Err(_) => return false,
+                        }
                     }
                 }
             }

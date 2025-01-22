@@ -151,7 +151,7 @@ impl Automaton {
 
 impl TA for Automaton {
     fn clocks(&self) -> Clock {
-        todo!()
+        1
     }
 }
 
@@ -197,7 +197,7 @@ mod tests {
     use petgraph::graph::DiGraph;
     use symbol_table::SymbolTable;
 
-    use crate::automata::{expressions::Expression, statements::Statement};
+    use crate::automata::{expressions::Expression, literal::Literal, statements::Statement};
 
     use super::{Action, Automaton, Edge, Location};
 
@@ -215,7 +215,7 @@ mod tests {
             node_b,
             Edge::new_input(
                 Action::new(symbol_input),
-                Expression::new_true(),
+                Literal::new_true().into(),
                 Statement::empty(),
             ),
         );

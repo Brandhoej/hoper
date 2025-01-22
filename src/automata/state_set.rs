@@ -9,7 +9,7 @@ pub struct StateSet {
 }
 
 impl StateSet {
-    pub fn empty() -> Self {
+    pub fn new() -> Self {
         Self {
             states: HashMap::new(),
         }
