@@ -4,7 +4,7 @@ use crate::zones::constraint::Clock;
 
 use super::literal::Literal;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Binary {
     Conjunction,
     Disjunction,
@@ -19,7 +19,7 @@ impl Display for Binary {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Unary {
     LogicalNegation,
 }
@@ -32,7 +32,7 @@ impl Display for Unary {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Comparison {
     LessThanOrEqual,
     LessThan,
@@ -53,7 +53,7 @@ impl Display for Comparison {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Expression {
     Unary(Unary, Box<Expression>),
     Binary(Box<Expression>, Binary, Box<Expression>),

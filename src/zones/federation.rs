@@ -16,7 +16,7 @@ impl Federation {
         let mut iterator = dbms.iter();
         if let Some(first) = iterator.next() {
             for dbm in iterator {
-                if dbm.clocks() != first.clocks() {
+                if dbm.dimensions() != first.dimensions() {
                     panic!("inconsistent dimension between federation and DBM")
                 }
             }
@@ -43,7 +43,7 @@ impl Federation {
     #[inline]
     pub fn clocks(&self) -> Option<Clock> {
         match self.dbms.first() {
-            Some(dbm) => Some(dbm.clocks()),
+            Some(dbm) => Some(dbm.dimensions()),
             None => None,
         }
     }
@@ -61,7 +61,7 @@ impl Federation {
     #[inline]
     pub fn append(&mut self, dbm: DBM<Canonical>) {
         if let Some(clocks) = self.clocks() {
-            if clocks == dbm.clocks() {
+            if clocks == dbm.dimensions() {
                 panic!("inconsistent clocks in federation and dbm");
             }
         }
@@ -263,7 +263,7 @@ impl Federation {
 
     pub fn subtract(self, minued: &DBM<Canonical>) -> Self {
         if let Some(clocks) = self.clocks() {
-            if clocks != minued.clocks() {
+            if clocks != minued.dimensions() {
                 panic!("inconsistent number of clocks in federation and DBM")
             }
         }

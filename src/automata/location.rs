@@ -1,24 +1,28 @@
 use symbol_table::Symbol;
 
-use super::{expressions::Expression, literal::Literal, statements::Statement};
+use super::{expressions::Expression, literal::Literal};
 
-#[derive(Clone)]
+/// Locations represents sources and destinations connecting edges allowing the simulator to make moves.
+#[derive(Clone, Debug)]
 pub enum Location {
+    /// Leaf nodes are singular entities describing an atomic source or destination for edges.
+    /// They are named with a unique symbol differentiating multiple locations between eachother.
+    /// Invariants describes upper-bounds on clock valuations and are restricted to An invariant
+    /// must be a conjunction of simple conditions on clocks, differences between clocks, and
+    /// boolean expressions not involving clocks. The bound must be given by an integer expression.
+    /// Thereby, lower-bounds on clocks are disallowed and considered harmful for performance in many
+    /// scenarious. Instead, if lower-bounds are strictly required then they should (Read must) be
+    /// implemented as a part of all edges having the location as a destination instead.
     Leaf {
         name: Symbol,
         invariant: Expression,
-        update: Statement,
     },
     Branch(Vec<Location>),
 }
 
 impl Location {
-    pub const fn new(name: Symbol, invariant: Expression, update: Statement) -> Self {
-        Self::Leaf {
-            name,
-            invariant,
-            update,
-        }
+    pub const fn new(name: Symbol, invariant: Expression) -> Self {
+        Self::Leaf { name, invariant }
     }
 
     pub fn combine(locations: impl Iterator<Item = Self>) -> Self {
@@ -26,7 +30,7 @@ impl Location {
     }
 
     pub fn with_name(name: Symbol) -> Self {
-        Self::new(name, Literal::new_true().into(), Statement::empty())
+        Self::new(name, Literal::new_true().into())
     }
 
     pub const fn name(&self) -> Option<&Symbol> {
@@ -43,18 +47,6 @@ impl Location {
                 locations
                     .iter()
                     .map(|location| location.invariant().clone())
-                    .collect(),
-            ),
-        }
-    }
-
-    pub fn update(&self) -> Statement {
-        match self {
-            Location::Leaf { update, .. } => update.clone(),
-            Location::Branch(locations) => Statement::sequence(
-                locations
-                    .iter()
-                    .map(|location| location.update().clone())
                     .collect(),
             ),
         }

@@ -16,6 +16,11 @@ use super::{
 /// Intuitively it makes sense that a specification must be input-enabled
 /// because any system specification should allow any interaction.
 /// However, this interaction can lead to an inconsistent state.
+///
+/// An input cannot be precented from being sent to a system,
+/// but it might be unpredictable how the system behaves after
+/// receiving it. Input-enabledness enforces explicit handling
+/// of all inputs at all times.
 pub struct Specification(Box<dyn TIOA>);
 
 impl Specification {
@@ -60,8 +65,8 @@ mod tests {
     use symbol_table::SymbolTable;
 
     use crate::automata::{
-        action::Action, automaton::Automaton, completer::Completer, edge::Edge, literal::Literal,
-        location::Location, statements::Statement,
+        action::Action, automaton::Automaton, edge::Edge, input_enabled::InputEnabled,
+        literal::Literal, location::Location, statements::Statement,
     };
 
     #[test]
@@ -84,6 +89,6 @@ mod tests {
         );
 
         let tioa = Automaton::new(node_a, graph).unwrap();
-        let specification = tioa.complete();
+        let specification = tioa.is_input_enabled().unwrap();
     }
 }

@@ -4,9 +4,12 @@ use super::{action::Action, channel::Channel, expressions::Expression, statement
 /// represents a set of transitions. The edge is either an input or output depending on
 /// its channel. For the edge to be traversable the guard must be satisfied. For all states
 /// satisfying the guard the update can be apply simulating the traversal yielding a resulting state.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Edge {
     channel: Channel,
+    /// A guard must be a conjunction of simple conditions on clocks,
+    /// differences between clocks, and boolean expressions not involving clocks.
+    /// Ultimately it should be impossible to construct a convex federation.
     guard: Expression,
     update: Statement,
 }

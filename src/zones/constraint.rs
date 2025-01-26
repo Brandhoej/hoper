@@ -151,7 +151,7 @@ pub type Limit = i16;
 /// relation between two clocks (c0 - c1 RELATION). This encoding uses
 /// the least significant bit to represent the strictness and the other
 /// bits as the limit. The encoding is [limit] [1 bit strictness].
-#[derive(PartialEq, Eq, Debug, Clone, Copy)]
+#[derive(PartialEq, Eq, Debug, Clone, Copy, Hash)]
 pub struct Relation(Limit);
 
 /// The minimum possible limit the relation supports is an i15 minimum equivalent.
@@ -175,6 +175,14 @@ impl Relation {
             Strictness::Weak => 1,
         };
         Self((limit << 1) | strictness_bit)
+    }
+
+    pub const fn weak(limit: Limit) -> Self {
+        Self::new(limit, Strictness::Weak)
+    }
+
+    pub const fn strict(limit: Limit) -> Self {
+        Self::new(limit, Strictness::Strict)
     }
 
     /// Returns the limit of the relation which can be
@@ -228,6 +236,16 @@ impl Relation {
     /// Negates the relation and returns self.
     pub const fn negation(&self) -> Self {
         Self::new(-self.limit(), self.strictness().opposite())
+    }
+
+    /// Determines whether applying `self` tightens the constraint between two clock values.
+    pub const fn tightens(self, from: Self, to: Self) -> bool {
+        from.0 > self.0 && self.negation().0 < to.0
+    }
+
+    /// Determines whether applying `self` loosens the constraint between two clock values.
+    pub const fn loosens(self, from: Self, to: Self) -> bool {
+        from.0 < self.0 && self.negation().0 > to.0
     }
 
     /// Returns the sum of two constraints. The sum is satisfies both original constraints (lhs/rhs).

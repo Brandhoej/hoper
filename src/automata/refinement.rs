@@ -176,6 +176,10 @@ impl Refinement {
     }
 
     pub fn refines(&self) -> bool {
+        // TODO: Use crossbeam to multi-thread the refinment check.
+        // An example where work is shared between threads can be seen here:
+        // https://docs.rs/crossbeam/latest/crossbeam/deque/index.html
+
         let mut passed: StateSet = StateSet::new();
         let mut worklist: VecDeque<RefinementStatePair> = VecDeque::new();
 
@@ -185,9 +189,7 @@ impl Refinement {
             Err(_) => return false,
         };
 
-        while !worklist.is_empty() {
-            let pair = worklist.pop_front().unwrap();
-
+        while let Some(pair) = worklist.pop_front() {
             let mut states: Vec<(
                 Box<dyn Iterator<Item = State>>,
                 Box<dyn Iterator<Item = State>>,

@@ -1,6 +1,6 @@
 use crate::zones::constraint::{Clock, REFERENCE};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Literal {
     Boolean(bool),
     Clock(Clock),

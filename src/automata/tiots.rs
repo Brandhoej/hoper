@@ -2,7 +2,7 @@ use crate::zones::federation::Federation;
 
 use super::{
     action::Action,
-    extrapolator::Extrapolator,
+    dep_extrapolator::DepExtrapolator,
     ioa::IOA,
     ta::TA,
     tioa::{LocationTree, Move, TIOA},
@@ -100,7 +100,7 @@ where
 impl<T: ?Sized + TIOA> TIOTS for T {
     fn initial_state(&self) -> State {
         let location = TIOA::initial_location(self);
-        let federation = Extrapolator::extrapolate_expression(
+        let federation = DepExtrapolator::extrapolate_expression(
             Federation::universe(self.clocks()),
             &self.location(&location).unwrap().invariant(),
         );
@@ -113,7 +113,7 @@ impl<T: ?Sized + TIOA> TIOTS for T {
         moves: impl Iterator<Item = Move>,
     ) -> impl Iterator<Item = Transition> {
         let is_empty = source.federation.is_empty();
-        let mut extrapolator = Extrapolator::empty();
+        let mut extrapolator = DepExtrapolator::empty();
 
         moves
             .filter_map(move |m| {

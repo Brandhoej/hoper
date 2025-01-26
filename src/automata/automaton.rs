@@ -7,11 +7,12 @@ use petgraph::{
 };
 use symbol_table::Symbol;
 
-use crate::zones::constraint::Clock;
+use crate::zones::{constraint::Clock, dbm::DBM};
 
 use super::{
     action::Action,
     channel::Channel,
+    dep_extrapolator::DepExtrapolator,
     edge::Edge,
     ioa::IOA,
     location::Location,
@@ -19,7 +20,10 @@ use super::{
     tioa::{LocationTree, Move, TIOA},
 };
 
-#[derive(Clone)]
+/// A Timed Input/Output Automaton which describes real time behaviour using clocks over reals.
+/// The underlying datastructure is a directed graph connecting locations through edges. This
+/// structure allows a symbolic representation of a TIOTS.
+#[derive(Clone, Debug)]
 pub struct Automaton {
     initial: NodeIndex,
     graph: DiGraph<Location, Edge>,
@@ -147,11 +151,43 @@ impl Automaton {
     pub fn connecting_degree(&self, source: NodeIndex, destination: NodeIndex) -> usize {
         self.connecting(source, destination).count()
     }
+
+    pub fn edge_iter(&self) -> impl Iterator<Item = EdgeIndex> {
+        self.graph.edge_indices()
+    }
+
+    pub fn node_iter(&self) -> impl Iterator<Item = NodeIndex> {
+        self.graph.node_indices()
+    }
+
+    pub fn order(&self) -> usize {
+        self.graph.node_count()
+    }
+
+    /// By only looking at the upper bound of clock valuations described in the invariant
+    /// a zone is extrapolated from 0 to the max local bounds. This set of valuations is
+    /// then used to see what inputs are not enabled.
+    pub fn locally_disabled(&self, node: NodeIndex, input: Action) -> impl Iterator<Item = Edge> {
+        vec![].into_iter()
+    }
+
+    /// Adds an edge to the underlying graph without ensuring that adding the edge breaks any
+    /// of the rules of the Automaton. An example is non-determinism, where an existing edge
+    /// can lead to a different state from the same state as the edge to be added. Ergo, this
+    /// functionality should be used with extreme caution.
+    pub fn force_add_edge(
+        &mut self,
+        source: NodeIndex,
+        edge: Edge,
+        destination: NodeIndex,
+    ) -> EdgeIndex {
+        self.graph.add_edge(source, destination, edge)
+    }
 }
 
 impl TA for Automaton {
     fn clocks(&self) -> Clock {
-        1
+        1 // FIXME
     }
 }
 
@@ -197,7 +233,7 @@ mod tests {
     use petgraph::graph::DiGraph;
     use symbol_table::SymbolTable;
 
-    use crate::automata::{expressions::Expression, literal::Literal, statements::Statement};
+    use crate::automata::{literal::Literal, statements::Statement};
 
     use super::{Action, Automaton, Edge, Location};
 

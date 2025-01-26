@@ -2,7 +2,10 @@ use std::ops::{Index, IndexMut};
 
 use bitset::BitSet;
 
-use super::constraint::{Clock, Limit, Relation, Strictness, INFINITY, REFERENCE, ZERO};
+use super::{
+    bounds::Bounds,
+    constraint::{Clock, Limit, Relation, Strictness, INFINITY, REFERENCE, ZERO},
+};
 
 pub trait DBMState: Sized {}
 
@@ -10,19 +13,27 @@ pub trait DBMState: Sized {}
 pub struct DBM<State: DBMState> {
     /// The number of clocks inside the DBM.
     clocks: Clock,
-    /// The relations across the clocks.
-    relations: Box<[Relation]>, // Q: Would SmallVec be appropriate here?
+    // Q: Maybe an enum describing the internal state can be used to chose between
+    //      a SmallVec, boxed slice, or array.
+    /// The relations between the clocks.
+    relations: Box<[Relation]>,
     /// The internal state important for the current type of DBM.
     state: State,
 }
 
 impl<State: DBMState> DBM<State> {
+    /// Returns the number of clocks excluding the reference clock.
     pub const fn clocks(&self) -> Clock {
+        self.clocks - 1
+    }
+
+    /// Returns the number of clocks including the reference clock.
+    pub const fn dimensions(&self) -> Clock {
         self.clocks
     }
 
     pub const fn constraints(&self) -> usize {
-        (self.clocks() * self.clocks()) as usize
+        (self.dimensions() * self.dimensions()) as usize
     }
 
     pub fn relations(&self) -> &Box<[Relation]> {
@@ -40,13 +51,13 @@ impl<State: DBMState> DBM<State> {
     /// [(2; 0)-6, (2; 1)-7, (2; 2)-8]
     #[inline]
     pub const fn index(&self, i: Clock, j: Clock) -> usize {
-        (i * self.clocks() + j) as usize
+        (i * self.dimensions() + j) as usize
     }
 
     #[inline]
     pub const fn coordinates(&self, index: usize) -> (Clock, Clock) {
-        let i = (index as u16 / self.clocks()) as Clock;
-        let j = (index as u16 % self.clocks()) as Clock;
+        let i = (index as u16 / self.dimensions()) as Clock;
+        let j = (index as u16 % self.dimensions()) as Clock;
         (i, j)
     }
 
@@ -59,6 +70,16 @@ impl<State: DBMState> DBM<State> {
     fn set(&mut self, i: Clock, j: Clock, relation: Relation) {
         let index = self.index(i, j);
         self.relations[index] = relation
+    }
+
+    #[inline]
+    pub fn tightens(&self, i: Clock, j: Clock, relation: Relation) -> bool {
+        relation.tightens(self[(i, j)], self[(j, i)])
+    }
+
+    #[inline]
+    pub fn loosens(&self, i: Clock, j: Clock, relation: Relation) -> bool {
+        relation.loosens(self[(i, j)], self[(j, i)])
     }
 
     #[inline]
@@ -106,7 +127,7 @@ impl<State: DBMState> DBM<State> {
 
     #[inline]
     pub fn is_empty(&self) -> bool {
-        for c in REFERENCE..self.clocks() {
+        for c in REFERENCE..self.dimensions() {
             if self[(c, c)] != ZERO {
                 return true;
             }
@@ -117,7 +138,7 @@ impl<State: DBMState> DBM<State> {
     pub fn fmt_conjunctions(&self, labels: &Vec<&str>) -> String {
         let mut conjunctions: Vec<String> = Vec::new();
 
-        for i in REFERENCE + 1..self.clocks() {
+        for i in REFERENCE + 1..self.dimensions() {
             // Lower bound: 0 - c R N.
             let lower = self.lower(i);
             if !lower.is_infinity() {
@@ -140,7 +161,7 @@ impl<State: DBMState> DBM<State> {
                 ));
             }
 
-            for j in REFERENCE + 1..self.clocks() {
+            for j in REFERENCE + 1..self.dimensions() {
                 if i == REFERENCE || j == REFERENCE || i == j {
                     continue;
                 }
@@ -169,12 +190,12 @@ impl<State: DBMState> DBM<State> {
 
         dot.push_str("ranksep=4.0;\n");
 
-        for i in REFERENCE..self.clocks() {
+        for i in REFERENCE..self.dimensions() {
             dot.push_str(&format!("{} [label=\"{}\"];\n", i, labels[i as usize]));
         }
 
-        for i in REFERENCE..self.clocks() {
-            for j in REFERENCE..self.clocks() {
+        for i in REFERENCE..self.dimensions() {
+            for j in REFERENCE..self.dimensions() {
                 if minimal.test(self.index(i, j)) {
                     dot.push_str(&format!("{} -> {} [label=\"{}\"];\n", i, j, self[(i, j)]));
                 }
@@ -235,8 +256,8 @@ impl DBM<Canonical> {
         let mut subset = true;
         let mut superset = true;
 
-        for i in REFERENCE..self.clocks() {
-            for j in REFERENCE..self.clocks() {
+        for i in REFERENCE..self.dimensions() {
+            for j in REFERENCE..self.dimensions() {
                 if !subset && !superset {
                     return (subset, superset);
                 }
@@ -272,7 +293,7 @@ impl DBM<Canonical> {
 
     /// Returns true if all clocks' upper bound is infinity.
     pub fn can_delay_indefinite(&self) -> bool {
-        for i in REFERENCE + 1..self.clocks() {
+        for i in REFERENCE + 1..self.dimensions() {
             if !self.upper(i).is_infinity() {
                 return false;
             }
@@ -286,7 +307,7 @@ impl DBM<Canonical> {
     /// This operation preserves the canonical form thereby applying it on a canonical DBM
     /// will result in a new canonical DBM.
     pub fn up(&mut self) {
-        for i in REFERENCE..self.clocks() {
+        for i in REFERENCE..self.dimensions() {
             self.set_upper(i, INFINITY);
         }
     }
@@ -296,7 +317,7 @@ impl DBM<Canonical> {
     /// by some delay d. Algorithmically, it is computed by setting the lower bound on all individual
     /// clocks to (0, ≤).
     pub fn down(&mut self) {
-        for i in REFERENCE..self.clocks() {
+        for i in REFERENCE..self.dimensions() {
             // Only if the lower bound is not already lowered do we lower it.
             // For DBMs where diagonals are valid i.e., they are non-negative
             // then we can assume that only when it is greater than (0, ≤)
@@ -309,7 +330,7 @@ impl DBM<Canonical> {
                 // This is because a diagonal constraint on the clock may represent
                 // a easier path to take with less constraint. Because of this we
                 // have to close it on its diagonals and maybe further weaken the constraint.
-                for j in REFERENCE..self.clocks() {
+                for j in REFERENCE..self.dimensions() {
                     if self.diagonal(i, j) < self.lower(i) {
                         self.set_lower(i, self.diagonal(i, j));
                     }
@@ -321,7 +342,7 @@ impl DBM<Canonical> {
     /// Removes all constraints on a given clock, i.e., the clock may take any positive value.
     /// This is expressed as {u[x=d] | u ∈ D, d ∈ ℝ+}.
     pub fn free(&mut self, clock: Clock) {
-        for i in REFERENCE..self.clocks() {
+        for i in REFERENCE..self.dimensions() {
             if i != clock {
                 self.set_diagonal(clock, i, INFINITY);
                 self.set_diagonal(i, clock, self.upper(i));
@@ -333,7 +354,7 @@ impl DBM<Canonical> {
     pub fn reset(&mut self, clock: Clock, limit: Limit) {
         let positive = Relation::new(limit, Strictness::Weak);
         let negative = Relation::new(-limit, Strictness::Weak);
-        for i in REFERENCE..self.clocks() {
+        for i in REFERENCE..self.dimensions() {
             self.set_diagonal(clock, i, positive.addition(&self.lower(i)));
             self.set_diagonal(i, clock, self.upper(i).addition(&negative));
         }
@@ -345,7 +366,7 @@ impl DBM<Canonical> {
             return;
         }
 
-        for i in REFERENCE..self.clocks() {
+        for i in REFERENCE..self.dimensions() {
             if i != lhs {
                 self.set_diagonal(lhs, i, self.get(rhs, i));
                 self.set_diagonal(i, lhs, self.get(i, rhs));
@@ -360,7 +381,7 @@ impl DBM<Canonical> {
     pub fn shift(&mut self, clock: Clock, limit: Limit) {
         let positive = Relation::new(limit, Strictness::Weak);
         let negative = Relation::new(-limit, Strictness::Weak);
-        for i in REFERENCE..self.clocks() {
+        for i in REFERENCE..self.dimensions() {
             if i != clock {
                 let from = self.get(clock, i);
                 self.set_diagonal(clock, i, from.addition(&positive));
@@ -394,11 +415,11 @@ impl DBM<Canonical> {
     /// are relased for clocks within the same group then the clocks will have
     /// the same values. The second vector is the heads of the different chains.
     pub fn synchronised_clocks(&self) -> (Vec<Clock>, Vec<Clock>) {
-        let mut bits = BitSet::with_capacity(self.clocks() as usize);
-        let mut chains = vec![0; self.clocks() as usize];
-        let mut heads = Vec::with_capacity(self.clocks() as usize);
+        let mut bits = BitSet::with_capacity(self.dimensions() as usize);
+        let mut chains = vec![0; self.dimensions() as usize];
+        let mut heads = Vec::with_capacity(self.dimensions() as usize);
 
-        for i in REFERENCE..self.clocks() {
+        for i in REFERENCE..self.dimensions() {
             // If the clock has already been assigned to a synchronisation group
             // then we skip it and continue to the next one.
             if bits.test(i as usize) {
@@ -410,7 +431,7 @@ impl DBM<Canonical> {
             heads.push(k);
             bits.set(i as usize, true);
 
-            for j in i + 1..self.clocks() {
+            for j in i + 1..self.dimensions() {
                 // Check if the difference between the clocks' valuation will always be 0.
                 if self[(i, j)].limit() == -self[(j, i)].limit() {
                     // Point back to the previous clock in the chain.
@@ -428,11 +449,11 @@ impl DBM<Canonical> {
 
     // Returns true if an over-approximated intersection was found.
     pub fn maybe_intersects(&self, other: &Self) -> bool {
-        if self.clocks() != other.clocks() {
+        if self.dimensions() != other.dimensions() {
             panic!("inconsistent DBM cardinality")
         }
 
-        for i in REFERENCE + 1..self.clocks() {
+        for i in REFERENCE + 1..self.dimensions() {
             for j in 0..i {
                 let ij1 = self.get(i, j);
                 if !ij1.is_infinity() && ij1.negation() >= other.get(j, i) {
@@ -450,14 +471,14 @@ impl DBM<Canonical> {
     }
 
     pub fn intersection(self, src: &Self) -> Option<Self> {
-        if self.clocks() != src.clocks() {
+        if self.dimensions() != src.dimensions() {
             panic!("inconsistent DBM cardinality")
         }
 
         let mut dst = self.dirty();
 
-        for i in REFERENCE..dst.clocks() {
-            for j in REFERENCE..dst.clocks() {
+        for i in REFERENCE..dst.dimensions() {
+            for j in REFERENCE..dst.dimensions() {
                 if dst[(i, j)] > src[(i, j)] {
                     dst[(i, j)] = src[(i, j)].clone();
                     if src[(i, j)].negation() >= dst[(j, i)] {
@@ -484,7 +505,7 @@ impl DBM<Canonical> {
 
         let ij = self[(i, j)].clone();
 
-        for k in REFERENCE..self.clocks() {
+        for k in REFERENCE..self.dimensions() {
             let jk = self[(j, k)].clone();
             if jk.is_infinity() {
                 continue;
@@ -496,7 +517,7 @@ impl DBM<Canonical> {
             }
         }
 
-        for p in REFERENCE..self.clocks() {
+        for p in REFERENCE..self.dimensions() {
             let pi = self[(p, i)].clone();
             if pi.is_infinity() {
                 continue;
@@ -509,7 +530,7 @@ impl DBM<Canonical> {
 
             self.set(p, j, pj.clone());
 
-            for q in REFERENCE..self.clocks() {
+            for q in REFERENCE..self.dimensions() {
                 let jq = self[(j, q)].clone();
                 if jq.is_infinity() {
                     continue;
@@ -528,14 +549,34 @@ impl DBM<Canonical> {
         return Ok(self);
     }
 
+    /// Only if the new relation tightens the existing relation
+    /// is the relation updated and closed.
     pub fn tighten(
         mut self,
         i: Clock,
         j: Clock,
         relation: Relation,
     ) -> Result<DBM<Canonical>, DBM<Unsafe>> {
-        self.set(i, j, relation);
-        self.close_ij(i, j)
+        if self.tightens(i, j, relation) {
+            self.set(i, j, relation);
+            return self.close_ij(i, j);
+        }
+        Ok(self)
+    }
+
+    /// Only if the new relation loosens the existing relation
+    /// is the relation updated and closed.
+    pub fn loosen(
+        mut self,
+        i: Clock,
+        j: Clock,
+        relation: Relation,
+    ) -> Result<DBM<Canonical>, DBM<Unsafe>> {
+        if self.loosens(i, j, relation) {
+            self.set(i, j, relation);
+            return self.close_ij(i, j);
+        }
+        Ok(self)
     }
 
     pub fn subtraction(self, minued: &Self) -> Vec<DBM<Canonical>> {
@@ -543,7 +584,7 @@ impl DBM<Canonical> {
         let mut subtrahend = self;
         let mut result = vec![];
         let minimal = subtrahend.minimal();
-        let clocks = subtrahend.clocks();
+        let clocks = subtrahend.dimensions();
 
         for i in REFERENCE..clocks {
             for j in REFERENCE..clocks {
@@ -586,14 +627,14 @@ impl DBM<Canonical> {
         i: Clock,
         j: Clock,
     ) -> Option<Relation> {
-        if self.clocks() != other.clocks() {
+        if self.dimensions() != other.dimensions() {
             panic!("inconsistent clocks betweem DBMs")
         }
 
         let self_ij = self[(i, j)].clone();
         let other_ij = other[(i, j)].as_weak();
 
-        for k in REFERENCE..self.clocks() {
+        for k in REFERENCE..self.dimensions() {
             if k == i || k == j {
                 continue;
             }
@@ -661,16 +702,29 @@ impl DBM<Canonical> {
         bits
     }
 
+    pub fn minimal_bounds(&self) -> Bounds {
+        let minimal = self.minimal();
+        let mut bounds = Bounds::empty();
+        for i in REFERENCE..self.dimensions() {
+            for j in REFERENCE..self.dimensions() {
+                if minimal.test(self.index(i, j)) {
+                    bounds.set(i, j, self[(i, j)]);
+                }
+            }
+        }
+        bounds
+    }
+
     pub fn fmt_minimal_graphviz_digraph(&self, labels: &Vec<&str>) -> String {
         let mut minimal = self.minimal();
-        for i in REFERENCE..self.clocks() {
+        for i in REFERENCE..self.dimensions() {
             minimal.set(self.index(i, i), false);
         }
         self.fmt_graphviz_digraph(minimal, labels)
     }
 
     pub fn dirty(self) -> DBM<Dirty> {
-        let clocks = self.clocks();
+        let clocks = self.dimensions();
         DBM {
             clocks: self.clocks,
             relations: self.relations,
@@ -681,26 +735,47 @@ impl DBM<Canonical> {
     pub fn expand(&self, expansion: Relation) -> DBM<Canonical> {
         let mut dbm = self.clone().dirty();
 
-        for i in 0..dbm.clocks() {
-            for j in 0..dbm.clocks() {
+        for i in 0..dbm.dimensions() {
+            for j in 0..dbm.dimensions() {
                 if !dbm[(i, j)].is_infinity() {
                     dbm[(i, j)] += expansion
                 };
             }
         }
 
-        for i in 0..dbm.clocks() {
+        for i in 0..dbm.dimensions() {
             // Restore reflexive constraints.
             dbm[(i, i)] = ZERO;
             dbm[(0, i)] = ZERO;
-
-            /* I dont know if "dbm[(0, i)] = ZERO" is a correct replacement.
-            if dbm[(0, i)] > ZERO {
-                dbm[(0, i)] = ZERO;
-            }*/
         }
 
         dbm.clean().ok().unwrap()
+    }
+
+    pub fn extrapolate(self, bounds: Bounds) -> Result<Self, DBM<Unsafe>> {
+        if let Some(clocks) = bounds.clocks() {
+            // Check if the bounds describe a DBM with more clocks.
+            if self.clocks() < clocks {
+                panic!("too small DBM for extrapolating the bounds");
+            }
+        } else {
+            // No clocks requires means that the bounds is empty.
+            return Ok(self);
+        }
+
+        let mut dbm = self.dirty();
+
+        for ((i, j), relation) in bounds.into_iter() {
+            if i == j && relation != ZERO {
+                return Err(dbm.empty());
+            }
+
+            if dbm[(i, j)] != relation {
+                dbm[(i, j)] = relation;
+            }
+        }
+
+        dbm.clean()
     }
 }
 
@@ -720,8 +795,16 @@ impl Dirty {
         };
     }
 
+    pub fn any_touched(&self) -> bool {
+        self.flags.any()
+    }
+
     pub fn is_touched(&self, index: usize) -> bool {
         self.flags.test(index)
+    }
+
+    pub fn touched_count(&self) -> usize {
+        self.flags.count() as usize
     }
 
     fn touch(&mut self, clock: Clock) {
@@ -755,18 +838,41 @@ impl DBM<Dirty> {
         })
     }
 
+    pub fn tighten(&mut self, i: Clock, j: Clock, relation: Relation) {
+        if self.tightens(i, j, relation) {
+            self[(i, j)] = relation
+        }
+    }
+
+    pub fn loosen(&mut self, i: Clock, j: Clock, relation: Relation) {
+        if self.loosens(i, j, relation) {
+            self[(i, j)] = relation
+        }
+    }
+
     pub fn clean(self) -> Result<DBM<Canonical>, DBM<Unsafe>> {
+        // Nothin to clean? Then it must be already closed and cannonical.
+        // This relies on the fact, that an unsafe DBM cannot get dirty.
+        // Maybe in the future that would be an incorrect assumption.
+        if !self.state.any_touched() {
+            return Ok(DBM {
+                clocks: self.clocks,
+                relations: self.relations,
+                state: Canonical {},
+            });
+        }
+
         self.close()
     }
 
     fn close(mut self) -> Result<DBM<Canonical>, DBM<Unsafe>> {
-        for k in REFERENCE..self.clocks() {
-            for i in REFERENCE..self.clocks() {
+        for k in REFERENCE..self.dimensions() {
+            for i in REFERENCE..self.dimensions() {
                 if i == k {
                     continue;
                 }
 
-                for j in REFERENCE..self.clocks() {
+                for j in REFERENCE..self.dimensions() {
                     let ij = self[(i, j)].clone();
                     let ik = self[(i, k)].clone();
                     let kj = self[(k, j)].clone();
@@ -782,11 +888,11 @@ impl DBM<Dirty> {
             }
         }
 
-        return Ok(DBM {
+        Ok(DBM {
             clocks: self.clocks,
             relations: self.relations,
             state: Canonical {},
-        });
+        })
     }
 }
 
@@ -804,7 +910,10 @@ impl IndexMut<(Clock, Clock)> for DBM<Dirty> {
 mod tests {
     use rand::distributions::uniform::UniformSampler;
 
-    use crate::zones::constraint::{Relation, RelationsSample, Strictness, UniformRelations};
+    use crate::zones::{
+        bounds::Bounds,
+        constraint::{Relation, RelationsSample, Strictness, UniformRelations},
+    };
 
     use super::{Canonical, Dirty, DBM};
 
@@ -1035,5 +1144,35 @@ mod tests {
         // There is three chains in total with heads at 0, 1, and 3.
         assert_eq!(vec![0, 2, 3, 4, 1], chains);
         assert_eq!(vec![0, 1], heads);
+    }
+
+    #[test]
+    fn extrapolation_universe_with_delayed_bounds() {
+        let dbm = DBM::universe(2);
+        let bounds = Bounds::delay(2);
+        let extrapolation = dbm.extrapolate(bounds);
+
+        assert!(extrapolation.is_ok());
+        assert!(extrapolation.ok().unwrap().is_eq(&DBM::universe(2)))
+    }
+
+    #[test]
+    fn extrapolate_universe_tighter_bounds() {
+        let dbm = DBM::universe(2);
+        let mut bounds = Bounds::delay(2);
+        bounds.tighten_lower(1, Relation::weak(-10));
+        bounds.tighten_lower(2, Relation::weak(-10));
+        bounds.tighten_upper(1, Relation::strict(20));
+        bounds.tighten_upper(2, Relation::strict(20));
+        let extrapolation = dbm.extrapolate(bounds);
+
+        assert!(extrapolation.is_ok());
+        assert_eq!(
+            extrapolation
+                .ok()
+                .unwrap()
+                .fmt_conjunctions(&vec!["x", "y"]),
+            "-x ≤ -10 ∧ x < 20 ∧ x - y < 10 ∧ -y ≤ -10 ∧ y < 20 ∧ y - x < 10"
+        );
     }
 }

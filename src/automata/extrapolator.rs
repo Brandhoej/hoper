@@ -1,170 +1,55 @@
 use crate::zones::{
-    constraint::{Limit, Relation, Strictness, REFERENCE},
-    federation::Federation,
+    bounds::Bounds,
+    dbm::{Canonical, Unsafe, DBM},
 };
 
-use super::{
-    expressions::{Binary, Comparison, Expression},
-    literal::Literal,
-    statements::Statement,
-};
+use super::expressions::Expression;
 
+/// An `Extrapolation` describes the maximum reachable bounds.
+/// These can be found using different strategies depending on performance
+/// requirements. Maybe diagonal constraints are ignored and just
+/// lower/upper bounds are taken into consideration.
+///
+/// TODO: Consider storing bounds on zones and reusing them for a following extrapolation.
+pub enum Extrapolation {
+    /// Takes diagonal constraints into account but does zone extrapolation
+    /// on the fly. Meaning that no information regarding minimum zones are
+    /// stored to make the proceeding extrapolations more effecient.
+    DifferenceOnTheFly,
+}
+
+/// The range of clocks can in theory be unbounded, meaning that a clock can run
+/// indefinitely, taking any real value. This means that one can stay at a location for
+/// an indefinite time. Extrapolation, in contrast to Uppaal is significantly
+/// different because it is not required for locations to have upper bounds on clocks.
+/// One direct example of this are implementation's locations. Which requires either
+/// output urgency or independent progress. Where independent progress in an implementation
+/// is an indefinite delay. However, in many cases there are upper and lower bounds on clock
+/// valuations. These we can utilise to restrict zones when delaying in locations.
+///
+/// OBS: The restrictions on the Automaton ensures that all exploration results in a convex zone.
+/// Therefore all location invariants max bounds are a minimum representation of the over-approximated
+/// zone's minimum representation.
+///
+/// More in-depth the restrictions states that essentially all location invariants only describe upper-bounds
+/// and diagonal constraints. Edges are always convex meaning that no possible disjunction restricts the
+/// clocal valuations in such a way that more than one zone is required to describe the exact zone for the guard.
+///
+/// The way the TIOTS works is that delays happen in the locations. Where we delay restricted
+/// by the invariant's bounds. Meaning that each location essentially have a zone assocaited with
+/// it, which describes an over-approximated zone reachable in the location. Then when an edge is
+/// traversed the extrapolated zone is further restricted (and still convex).
 pub struct Extrapolator {
-    stack: Vec<Literal>,
+    extrapolation: Extrapolation,
 }
 
 impl Extrapolator {
-    pub const fn new(stack: Vec<Literal>) -> Self {
-        Self { stack }
-    }
-
-    pub const fn empty() -> Self {
-        Self::new(vec![])
-    }
-
     pub fn expression(
         &mut self,
-        mut federation: Federation,
+        mut dbm: DBM<Canonical>,
         expression: &Expression,
-    ) -> Federation {
-        match expression {
-            Expression::Unary(unary, expression) => {
-                federation = self.expression(federation, expression);
-                let value = self.stack.pop().unwrap();
-
-                match unary {
-                    super::expressions::Unary::LogicalNegation => {
-                        let negation = Literal::Boolean(!value.boolean().unwrap());
-                        self.stack.push(negation);
-                        return federation.inverse();
-                    }
-                }
-            }
-            Expression::Binary(lhs, binary, rhs) => {
-                federation = self.expression(federation, &lhs);
-                match binary {
-                    Binary::Conjunction => {
-                        let lhs_federation = self.expression(federation.clone(), &lhs);
-                        let lhs_bool = self.stack.pop().unwrap().boolean().unwrap();
-
-                        if !lhs_bool {
-                            self.stack.push(Literal::new_false());
-                            return federation.clear();
-                        }
-
-                        let rhs_federation = self.expression(federation.clone(), &rhs);
-                        let rhs_bool = self.stack.pop().unwrap().boolean().unwrap();
-
-                        if !rhs_bool {
-                            self.stack.push(Literal::new_false());
-                            return federation.clear();
-                        }
-
-                        self.stack.push(Literal::new_true());
-                        lhs_federation.intersection(rhs_federation)
-                    }
-                    Binary::Disjunction => {
-                        let mut lhs_federation = self.expression(federation.clone(), &lhs);
-                        let lhs_bool = self.stack.pop().unwrap().boolean().unwrap();
-
-                        let rhs_federation = self.expression(federation.clone(), &rhs);
-                        let rhs_bool = self.stack.pop().unwrap().boolean().unwrap();
-
-                        self.stack.push(Literal::new_boolean(lhs_bool || rhs_bool));
-
-                        if lhs_bool && rhs_bool {
-                            lhs_federation.union(rhs_federation);
-                            return lhs_federation;
-                        } else if lhs_bool {
-                            return lhs_federation;
-                        } else if rhs_bool {
-                            return rhs_federation;
-                        } else {
-                            federation.clear()
-                        }
-                    }
-                }
-            }
-            Expression::Group(expression) => self.expression(federation, expression),
-            Expression::Literal(value) => {
-                self.stack.push(value.clone());
-                federation
-            }
-            Expression::ClockConstraint(operand, comparison, limit) => {
-                federation = self.expression(federation, &operand);
-                let clock = self.stack.pop().unwrap().clock().unwrap();
-
-                federation = self.expression(federation, &limit);
-                let limit_literal = self.stack.pop().unwrap().i16().unwrap();
-
-                match comparison {
-                    Comparison::LessThanOrEqual => federation
-                        .tighten_upper(clock, Relation::new(limit_literal, Strictness::Weak)),
-                    Comparison::LessThan => federation
-                        .tighten_upper(clock, Relation::new(limit_literal, Strictness::Strict)),
-                    Comparison::Equal => federation.tighten_limit(clock, REFERENCE, limit_literal),
-                    Comparison::GreaterThanOrEqual => federation
-                        .tighten_lower(clock, Relation::new(limit_literal, Strictness::Weak)),
-                    Comparison::GreaterThan => federation
-                        .tighten_lower(clock, Relation::new(limit_literal, Strictness::Strict)),
-                }
-            }
-            Expression::DiagonalClockConstraint(minuend, subtrahend, comparison, limit) => {
-                federation = self.expression(federation, &minuend);
-                let minuend_clock = self.stack.pop().unwrap().clock().unwrap();
-
-                federation = self.expression(federation, &subtrahend);
-                let subtrahend_clock = self.stack.pop().unwrap().clock().unwrap();
-
-                federation = self.expression(federation, &limit);
-                let limit_literal = self.stack.pop().unwrap().i16().unwrap();
-
-                match comparison {
-                    Comparison::LessThanOrEqual => federation.tighten_relation(
-                        minuend_clock,
-                        subtrahend_clock,
-                        Relation::new(limit_literal, Strictness::Weak),
-                    ),
-                    Comparison::LessThan => federation.tighten_relation(
-                        minuend_clock,
-                        subtrahend_clock,
-                        Relation::new(limit_literal, Strictness::Strict),
-                    ),
-                    Comparison::Equal => {
-                        federation.tighten_limit(minuend_clock, subtrahend_clock, limit_literal)
-                    }
-                    Comparison::GreaterThanOrEqual => federation.tighten_relation(
-                        subtrahend_clock,
-                        minuend_clock,
-                        Relation::new(limit_literal, Strictness::Weak),
-                    ),
-                    Comparison::GreaterThan => federation.tighten_relation(
-                        subtrahend_clock,
-                        minuend_clock,
-                        Relation::new(limit_literal, Strictness::Strict),
-                    ),
-                }
-            }
-        }
-    }
-
-    pub fn statement(&mut self, federation: Federation, statement: &Statement) -> Federation {
-        match statement {
-            Statement::Sequence(statements) | Statement::Branch(statements) => {
-                statements.iter().fold(federation, |federation, statement| {
-                    self.statement(federation, statement)
-                })
-            }
-            Statement::Expression(expression) => self.expression(federation, expression),
-            Statement::FreeClock(clock) => federation.free(*clock),
-        }
-    }
-
-    pub fn extrapolate_expression(federation: Federation, expression: &Expression) -> Federation {
-        Extrapolator::empty().expression(federation, expression)
-    }
-
-    pub fn extrapolate_statement(federation: Federation, statement: &Statement) -> Federation {
-        Extrapolator::empty().statement(federation, statement)
+    ) -> Result<DBM<Canonical>, DBM<Unsafe>> {
+        let bounds = Bounds::empty();
+        dbm.extrapolate(bounds)
     }
 }

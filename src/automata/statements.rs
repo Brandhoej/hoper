@@ -6,7 +6,7 @@ use crate::zones::constraint::Clock;
 
 use super::expressions::Expression;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Statement {
     Sequence(Vec<Statement>),
     Branch(Vec<Statement>),

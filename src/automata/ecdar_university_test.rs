@@ -6,17 +6,16 @@ mod tests {
     use crate::automata::{
         action::Action,
         automaton::Automaton,
-        completer::Completer,
         edge::Edge,
         expressions::{Comparison, Expression},
+        input_enabled::InputEnabled,
         literal::Literal,
         location::Location,
         refinement::Refinement,
-        specification::Specification,
         statements::Statement,
     };
 
-    fn new_specification() -> Automaton {
+    fn new_specification_tioa() -> Automaton {
         let symbols = SymbolTable::new();
         // Location names:
         let waiting_symbol = symbols.intern("waiting");
@@ -42,7 +41,6 @@ mod tests {
                 Comparison::LessThanOrEqual,
                 Literal::new_i16(20).into(),
             ),
-            Statement::empty(),
         ));
         // if u > 2 and grant?
         graph.add_edge(
@@ -107,8 +105,8 @@ mod tests {
     #[test]
     fn refinements() {
         let refinment = Refinement::new(
-            new_specification().complete(),
-            new_specification().complete(),
+            new_specification_tioa().is_input_enabled().unwrap(),
+            new_specification_tioa().is_input_enabled().unwrap(),
         );
         assert!(refinment.is_ok());
         assert!(refinment.unwrap().refines());
