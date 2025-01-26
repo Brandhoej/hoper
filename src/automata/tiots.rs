@@ -1,8 +1,14 @@
-use crate::zones::federation::Federation;
+use crate::{
+    automata::extrapolator::Extrapolator,
+    zones::{
+        bounds::Bounds,
+        dbm::{Canonical, DBM},
+    },
+};
 
 use super::{
     action::Action,
-    dep_extrapolator::DepExtrapolator,
+    interpreter::Interpreter,
     ioa::IOA,
     ta::TA,
     tioa::{LocationTree, Move, TIOA},
@@ -11,27 +17,24 @@ use super::{
 #[derive(Clone)]
 pub struct State {
     location: LocationTree,
-    federation: Federation,
+    zone: DBM<Canonical>,
 }
 
 impl State {
-    pub const fn new(location: LocationTree, federation: Federation) -> Self {
-        Self {
-            location,
-            federation,
-        }
+    pub const fn new(location: LocationTree, zone: DBM<Canonical>) -> Self {
+        Self { location, zone }
     }
 
     pub const fn location(&self) -> &LocationTree {
         &self.location
     }
 
-    pub const fn federation(&self) -> &Federation {
-        &self.federation
+    pub const fn zone(&self) -> &DBM<Canonical> {
+        &self.zone
     }
 
-    pub fn decompose(self) -> (LocationTree, Federation) {
-        (self.location, self.federation)
+    pub fn decompose(self) -> (LocationTree, DBM<Canonical>) {
+        (self.location, self.zone)
     }
 }
 
@@ -99,12 +102,13 @@ where
 
 impl<T: ?Sized + TIOA> TIOTS for T {
     fn initial_state(&self) -> State {
-        let location = TIOA::initial_location(self);
-        let federation = DepExtrapolator::extrapolate_expression(
-            Federation::universe(self.clocks()),
-            &self.location(&location).unwrap().invariant(),
-        );
-        State::new(location, federation)
+        let location = self.initial_location();
+        let invariant = self.location(&self.initial_location()).unwrap().invariant();
+        let zone = DBM::universe(self.clocks());
+        match Extrapolator::empty().expression(zone.dirty(), &invariant) {
+            Ok(zone) => State::new(location, zone),
+            Err(_) => panic!("a TIOTS should have an initial state"),
+        }
     }
 
     fn transitions(
@@ -112,8 +116,9 @@ impl<T: ?Sized + TIOA> TIOTS for T {
         source: State,
         moves: impl Iterator<Item = Move>,
     ) -> impl Iterator<Item = Transition> {
-        let is_empty = source.federation.is_empty();
-        let mut extrapolator = DepExtrapolator::empty();
+        let is_empty = source.zone.is_empty();
+        let mut extrapolator = Extrapolator::empty();
+        let mut interpreter = Interpreter::empty();
 
         moves
             .filter_map(move |m| {
@@ -121,32 +126,32 @@ impl<T: ?Sized + TIOA> TIOTS for T {
                     return None;
                 }
 
-                let mut federation = source.federation.clone();
+                let mut zone = source.zone.clone();
 
                 // If there is a edge we have to first check the guard and then traverse it.
                 if let Some(edge) = m.edge() {
                     // diagonal constraints, upper/lower bounds, and such.
-                    federation = extrapolator.expression(federation, edge.guard());
-                    if federation.is_empty() {
-                        return None;
+                    match extrapolator.expression(zone.dirty(), edge.guard()) {
+                        Ok(extrapolation) => zone = extrapolation,
+                        Err(_) => return None,
                     }
 
                     // Resets, copies, and such.
-                    federation = extrapolator.statement(federation, edge.update());
+                    zone = interpreter.statement(zone, edge.update());
                 }
 
                 // We have traversed the edge (if any) now we relax which is assumed indefinite.
                 // However, this will later be restricted by the location's invariant.
-                federation = federation.up();
+                zone.up();
 
                 // At the end of the move we have to check the invariant it it is satified.
                 let location = self.location(m.location()).unwrap();
-                federation = extrapolator.expression(federation, &location.invariant());
-                if federation.is_empty() {
-                    return None;
+                match extrapolator.expression(zone.dirty(), &location.invariant()) {
+                    Ok(extrapolation) => zone = extrapolation,
+                    Err(_) => return None,
                 }
 
-                let destination = State::new(m.location().clone(), federation);
+                let destination = State::new(m.location().clone(), zone);
 
                 Some(match m {
                     Move::To { edge, .. } => {

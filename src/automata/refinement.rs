@@ -1,6 +1,11 @@
 use std::collections::{HashSet, VecDeque};
 
-use crate::{automata::tiots::TIOTS, zones::federation::Federation};
+use crate::{
+    automata::tiots::TIOTS,
+    zones::
+        dbm::{Canonical, DBM}
+    ,
+};
 
 use super::{
     action::Action, ioa::IOA, specification::Specification, state_set::StateSet,
@@ -11,19 +16,20 @@ use super::{
 pub struct RefinementStatePair {
     implementation: LocationTree,
     specification: LocationTree,
-    federation: Federation,
+    zone: DBM<Canonical>,
 }
 
 impl RefinementStatePair {
     pub fn new(
         implementation: LocationTree,
         specification: LocationTree,
-        federation: Federation,
+        // Maybe this zone is actually a federation?
+        zone: DBM<Canonical>,
     ) -> Self {
         Self {
             implementation,
             specification,
-            federation,
+            zone,
         }
     }
 
@@ -31,31 +37,31 @@ impl RefinementStatePair {
         // Rule 5 (Time consistency): When the implementation requires a delay so must the specification.
         // Whenever s -d->ᔆ s' for some s' ∈ Qᔆ and d ∈ ℝ≥0, then t -d->ᵀ t' and (s', t') ∈ R for some t' ∈ Qᵀ.
 
-        let (implementation_location, implementation_federation) = implementation.decompose();
-        let (specification_location, specification_federation) = specification.decompose();
+        let (implementation_location, implementation_zone) = implementation.decompose();
+        let (specification_location, specification_zone) = specification.decompose();
 
-        if implementation_federation.is_empty() {
-            return Ok(Self::new(
+        // Q: Maybe this check is completely redundant?
+        // If the zone is empty then it is unsafe.
+        if implementation_zone.is_empty() {
+            return Err(());
+        }
+
+        if specification_zone.is_empty() {
+            return Err(());
+        }
+
+        // Only the clock valuations where the implementation can transition should the specification also transition.
+        if let Some(intersection) = implementation_zone.intersection(&specification_zone) {
+            Ok(Self::new(
                 implementation_location,
                 specification_location,
-                implementation_federation,
-            ));
-        }
-
-        if specification_federation.is_empty() {
+                intersection,
+            ))
+        } else {
+            // This happens when the implementation zone and specification zone are different.
+            // When that is the case then there is no intersection.
             return Err(());
         }
-
-        if !implementation_federation.is_subset(&specification_federation) {
-            return Err(());
-        }
-
-        Ok(Self::new(
-            implementation_location,
-            specification_location,
-            // Only the clock valuations where the implementation can transition should the specification also transition.
-            implementation_federation.intersection(specification_federation),
-        ))
     }
 
     pub fn implementation(&self) -> LocationTree {
@@ -66,16 +72,16 @@ impl RefinementStatePair {
         self.specification.clone()
     }
 
-    pub fn federation(&self) -> &Federation {
-        &self.federation
+    pub fn federation(&self) -> &DBM<Canonical> {
+        &self.zone
     }
 
     pub fn implementation_state(&self) -> State {
-        State::new(self.implementation.clone(), self.federation.clone())
+        State::new(self.implementation.clone(), self.zone.clone())
     }
 
     pub fn specification_state(&self) -> State {
-        State::new(self.specification.clone(), self.federation.clone())
+        State::new(self.specification.clone(), self.zone.clone())
     }
 }
 
@@ -83,7 +89,7 @@ impl From<RefinementStatePair> for State {
     fn from(value: RefinementStatePair) -> Self {
         Self::new(
             LocationTree::new_branch(vec![value.implementation, value.specification]),
-            value.federation,
+            value.zone,
         )
     }
 }

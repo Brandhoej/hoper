@@ -2,6 +2,8 @@ use std::ops::{Index, IndexMut};
 
 use bitset::BitSet;
 
+use crate::automata::conversion::Conversion;
+
 use super::{
     bounds::Bounds,
     constraint::{Clock, Limit, Relation, Strictness, INFINITY, REFERENCE, ZERO},
@@ -113,6 +115,104 @@ impl<State: DBMState> DBM<State> {
     fn set_diagonal(&mut self, i: Clock, j: Clock, relation: Relation) {
         let index = self.index(i, j);
         self.relations[index] = relation
+    }
+
+    /// The up operation computes the strongest postcondition of a zone with respect to delay.
+    /// Afterwards the DBM contains the clock assignments that can be reached from by delay.
+    /// up(D) = {u + d | u ∈ D, d ∈ ℝ+}.
+    /// This operation preserves the canonical form thereby applying it on a canonical DBM
+    /// will result in a new canonical DBM.
+    pub fn up(&mut self) {
+        for i in REFERENCE + 1..self.dimensions() {
+            self.set_upper(i, INFINITY);
+        }
+    }
+
+    /// In contrast to Up, Down computes the weakest precondition of the DBM with respect to delay.
+    /// down(D) = {u | u + d ∈ D, d ∈ ℝ+} such that the set of clock assignments that can reach D
+    /// by some delay d. Algorithmically, it is computed by setting the lower bound on all individual
+    /// clocks to (0, ≤).
+    pub fn down(&mut self) {
+        for i in REFERENCE + 1..self.dimensions() {
+            // Only if the lower bound is not already lowered do we lower it.
+            // For DBMs where diagonals are valid i.e., they are non-negative
+            // then we can assume that only when it is greater than (0, ≤)
+            // should it be lowered even further.
+            if !self.lower(i).is_zero() {
+                self.set_lower(i, ZERO);
+
+                // Now that we have lowered the lower bound on the clock.
+                // There may be the possibility that the DBM no longer is cannonical.
+                // This is because a diagonal constraint on the clock may represent
+                // a easier path to take with less constraint. Because of this we
+                // have to close it on its diagonals and maybe further weaken the constraint.
+                for j in REFERENCE..self.dimensions() {
+                    if self.diagonal(i, j) < self.lower(i) {
+                        self.set_lower(i, self.diagonal(i, j));
+                    }
+                }
+            }
+        }
+    }
+
+    /// Removes all constraints on a given clock, i.e., the clock may take any positive value.
+    /// This is expressed as {u[x=d] | u ∈ D, d ∈ ℝ+}.
+    pub fn free(&mut self, clock: Clock) {
+        for i in REFERENCE..self.dimensions() {
+            if i != clock {
+                self.set_diagonal(clock, i, INFINITY);
+                self.set_diagonal(i, clock, self.upper(i));
+            }
+        }
+    }
+
+    /// Sets the clock to be assigned to its limit. This is expressed as {u[x=m] | u ∈ D}.
+    pub fn reset(&mut self, clock: Clock, limit: Limit) {
+        let positive = Relation::new(limit, Strictness::Weak);
+        let negative = Relation::new(-limit, Strictness::Weak);
+        for i in REFERENCE..self.dimensions() {
+            self.set_diagonal(clock, i, positive.addition(&self.lower(i)));
+            self.set_diagonal(i, clock, self.upper(i).addition(&negative));
+        }
+    }
+
+    /// Sets the lhs to be equal to the rhs. This is expressed as {u[x=u(y)] | u ∈ D, x ∈ D}
+    pub fn copy(&mut self, lhs: Clock, rhs: Clock) {
+        if lhs == rhs {
+            return;
+        }
+
+        for i in REFERENCE..self.dimensions() {
+            if i != lhs {
+                self.set_diagonal(lhs, i, self.get(rhs, i));
+                self.set_diagonal(i, lhs, self.get(i, rhs));
+            }
+        }
+
+        self.set_diagonal(lhs, rhs, ZERO);
+        self.set_diagonal(rhs, lhs, ZERO);
+    }
+
+    /// Compound addition assignment of the clock "clock := clock + limit".
+    pub fn shift(&mut self, clock: Clock, limit: Limit) {
+        let positive = Relation::new(limit, Strictness::Weak);
+        let negative = Relation::new(-limit, Strictness::Weak);
+        for i in REFERENCE..self.dimensions() {
+            if i != clock {
+                let from = self.get(clock, i);
+                self.set_diagonal(clock, i, from.addition(&positive));
+                let to = self.get(i, clock);
+                self.set_diagonal(i, clock, to.addition(&negative));
+            }
+        }
+
+        if self.lower(clock) > ZERO {
+            self.set_lower(clock, ZERO);
+        }
+
+        if self.upper(clock) < ZERO {
+            self.set_upper(clock, ZERO);
+        }
     }
 
     #[inline]
@@ -265,6 +365,9 @@ impl DBM<Canonical> {
                 let lhs = self.diagonal(i, j);
                 let rhs = other.diagonal(i, j);
 
+                let lhs_str = lhs.to_string();
+                let rhs_str = rhs.to_string();
+
                 subset = subset && (lhs <= rhs);
                 superset = superset && (lhs >= rhs);
             }
@@ -274,13 +377,13 @@ impl DBM<Canonical> {
     }
 
     /// Returns true if self is a subset of other.
-    pub fn is_subset(&self, other: &Self) -> bool {
+    pub fn is_subset_of(&self, other: &Self) -> bool {
         let (subset, _) = self.relation(other);
         subset
     }
 
     /// Returns true if self is a superset of other.
-    pub fn is_superset(&self, other: &Self) -> bool {
+    pub fn is_superset_of(&self, other: &Self) -> bool {
         let (_, superset) = self.relation(other);
         superset
     }
@@ -291,6 +394,11 @@ impl DBM<Canonical> {
         subset && superset
     }
 
+    pub fn is_different(&self, other: &Self) -> bool {
+        let (subset, superset) = self.relation(other);
+        !subset && !superset
+    }
+
     /// Returns true if all clocks' upper bound is infinity.
     pub fn can_delay_indefinite(&self) -> bool {
         for i in REFERENCE + 1..self.dimensions() {
@@ -299,104 +407,6 @@ impl DBM<Canonical> {
             }
         }
         return true;
-    }
-
-    /// The up operation computes the strongest postcondition of a zone with respect to delay.
-    /// Afterwards the DBM contains the clock assignments that can be reached from by delay.
-    /// up(D) = {u + d | u ∈ D, d ∈ ℝ+}.
-    /// This operation preserves the canonical form thereby applying it on a canonical DBM
-    /// will result in a new canonical DBM.
-    pub fn up(&mut self) {
-        for i in REFERENCE..self.dimensions() {
-            self.set_upper(i, INFINITY);
-        }
-    }
-
-    /// In contrast to Up, Down computes the weakest precondition of the DBM with respect to delay.
-    /// down(D) = {u | u + d ∈ D, d ∈ ℝ+} such that the set of clock assignments that can reach D
-    /// by some delay d. Algorithmically, it is computed by setting the lower bound on all individual
-    /// clocks to (0, ≤).
-    pub fn down(&mut self) {
-        for i in REFERENCE..self.dimensions() {
-            // Only if the lower bound is not already lowered do we lower it.
-            // For DBMs where diagonals are valid i.e., they are non-negative
-            // then we can assume that only when it is greater than (0, ≤)
-            // should it be lowered even further.
-            if !self.lower(i).is_zero() {
-                self.set_lower(i, ZERO);
-
-                // Now that we have lowered the lower bound on the clock.
-                // There may be the possibility that the DBM no longer is cannonical.
-                // This is because a diagonal constraint on the clock may represent
-                // a easier path to take with less constraint. Because of this we
-                // have to close it on its diagonals and maybe further weaken the constraint.
-                for j in REFERENCE..self.dimensions() {
-                    if self.diagonal(i, j) < self.lower(i) {
-                        self.set_lower(i, self.diagonal(i, j));
-                    }
-                }
-            }
-        }
-    }
-
-    /// Removes all constraints on a given clock, i.e., the clock may take any positive value.
-    /// This is expressed as {u[x=d] | u ∈ D, d ∈ ℝ+}.
-    pub fn free(&mut self, clock: Clock) {
-        for i in REFERENCE..self.dimensions() {
-            if i != clock {
-                self.set_diagonal(clock, i, INFINITY);
-                self.set_diagonal(i, clock, self.upper(i));
-            }
-        }
-    }
-
-    /// Sets the clock to be assigned to its limit. This is expressed as {u[x=m] | u ∈ D}.
-    pub fn reset(&mut self, clock: Clock, limit: Limit) {
-        let positive = Relation::new(limit, Strictness::Weak);
-        let negative = Relation::new(-limit, Strictness::Weak);
-        for i in REFERENCE..self.dimensions() {
-            self.set_diagonal(clock, i, positive.addition(&self.lower(i)));
-            self.set_diagonal(i, clock, self.upper(i).addition(&negative));
-        }
-    }
-
-    /// Sets the lhs to be equal to the rhs. This is expressed as {u[x=u(y)] | u ∈ D, x ∈ D}
-    pub fn copy(&mut self, lhs: Clock, rhs: Clock) {
-        if lhs == rhs {
-            return;
-        }
-
-        for i in REFERENCE..self.dimensions() {
-            if i != lhs {
-                self.set_diagonal(lhs, i, self.get(rhs, i));
-                self.set_diagonal(i, lhs, self.get(i, rhs));
-            }
-        }
-
-        self.set_diagonal(lhs, rhs, ZERO);
-        self.set_diagonal(rhs, lhs, ZERO);
-    }
-
-    /// Compound addition assignment of the clock "clock := clock + limit".
-    pub fn shift(&mut self, clock: Clock, limit: Limit) {
-        let positive = Relation::new(limit, Strictness::Weak);
-        let negative = Relation::new(-limit, Strictness::Weak);
-        for i in REFERENCE..self.dimensions() {
-            if i != clock {
-                let from = self.get(clock, i);
-                self.set_diagonal(clock, i, from.addition(&positive));
-                let to = self.get(i, clock);
-                self.set_diagonal(i, clock, to.addition(&negative));
-            }
-        }
-
-        if self.lower(clock) > ZERO {
-            self.set_lower(clock, ZERO);
-        }
-
-        if self.upper(clock) < ZERO {
-            self.set_upper(clock, ZERO);
-        }
     }
 
     pub fn satisfies(&self, i: Clock, j: Clock, relation: Relation) -> bool {
@@ -708,7 +718,7 @@ impl DBM<Canonical> {
         for i in REFERENCE..self.dimensions() {
             for j in REFERENCE..self.dimensions() {
                 if minimal.test(self.index(i, j)) {
-                    bounds.set(i, j, self[(i, j)]);
+                    bounds = bounds.set(i, j, self[(i, j)]);
                 }
             }
         }
@@ -753,29 +763,10 @@ impl DBM<Canonical> {
     }
 
     pub fn extrapolate(self, bounds: Bounds) -> Result<Self, DBM<Unsafe>> {
-        if let Some(clocks) = bounds.clocks() {
-            // Check if the bounds describe a DBM with more clocks.
-            if self.clocks() < clocks {
-                panic!("too small DBM for extrapolating the bounds");
-            }
-        } else {
-            // No clocks requires means that the bounds is empty.
-            return Ok(self);
+        match self.dirty().extrapolate(bounds) {
+            Ok(dbm) => dbm.clean(),
+            Err(dbm) => Err(dbm),
         }
-
-        let mut dbm = self.dirty();
-
-        for ((i, j), relation) in bounds.into_iter() {
-            if i == j && relation != ZERO {
-                return Err(dbm.empty());
-            }
-
-            if dbm[(i, j)] != relation {
-                dbm[(i, j)] = relation;
-            }
-        }
-
-        dbm.clean()
     }
 }
 
@@ -850,6 +841,30 @@ impl DBM<Dirty> {
         }
     }
 
+    pub fn extrapolate(mut self, bounds: Bounds) -> Result<Self, DBM<Unsafe>> {
+        if let Some(clocks) = bounds.clocks() {
+            // Check if the bounds describe a DBM with more clocks.
+            if self.clocks() < clocks {
+                panic!("too small DBM for extrapolating the bounds");
+            }
+        } else {
+            // No clocks requires means that the bounds is empty.
+            return Ok(self);
+        }
+
+        for ((i, j), relation) in bounds.into_iter() {
+            if i == j && relation != ZERO {
+                return Err(self.empty());
+            }
+
+            if self[(i, j)] != relation {
+                self[(i, j)] = relation;
+            }
+        }
+
+        Ok(self)
+    }
+
     pub fn clean(self) -> Result<DBM<Canonical>, DBM<Unsafe>> {
         // Nothin to clean? Then it must be already closed and cannonical.
         // This relies on the fact, that an unsafe DBM cannot get dirty.
@@ -886,6 +901,10 @@ impl DBM<Dirty> {
                     return Err(self.empty());
                 }
             }
+        }
+
+        if self.is_empty() {
+            panic!("still empty after closure")
         }
 
         Ok(DBM {
@@ -1159,11 +1178,11 @@ mod tests {
     #[test]
     fn extrapolate_universe_tighter_bounds() {
         let dbm = DBM::universe(2);
-        let mut bounds = Bounds::delay(2);
-        bounds.tighten_lower(1, Relation::weak(-10));
-        bounds.tighten_lower(2, Relation::weak(-10));
-        bounds.tighten_upper(1, Relation::strict(20));
-        bounds.tighten_upper(2, Relation::strict(20));
+        let bounds = Bounds::delay(2)
+            .tighten_lower(1, Relation::weak(-10))
+            .tighten_lower(2, Relation::weak(-10))
+            .tighten_upper(1, Relation::strict(20))
+            .tighten_upper(2, Relation::strict(20));
         let extrapolation = dbm.extrapolate(bounds);
 
         assert!(extrapolation.is_ok());

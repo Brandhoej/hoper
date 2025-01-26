@@ -16,11 +16,11 @@ impl StateSet {
     }
 
     pub fn insert(&mut self, state: State) {
-        let (state_location, state_federation) = state.decompose();
-        if let Some(federation) = self.states.get_mut(&state_location) {
-            federation.union(state_federation);
+        let (location, zone) = state.decompose();
+        if let Some(federation) = self.states.get_mut(&location) {
+            federation.append(zone);
         } else {
-            self.states.insert(state_location, state_federation);
+            self.states.insert(location, zone.into());
         }
     }
 
@@ -34,8 +34,9 @@ impl StateSet {
     }
 
     pub fn contains(&self, state: State) -> bool {
-        if let Some(federation) = self.states.get(state.location()) {
-            state.federation().is_subset(federation)
+        let (location, zone) = state.decompose();
+        if let Some(federation) = self.states.get(&location) {
+            federation.includes(&zone.into())
         } else {
             false
         }

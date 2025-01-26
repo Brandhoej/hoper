@@ -1,6 +1,6 @@
 use std::fmt::{self, Display};
 
-use crate::zones::constraint::Clock;
+use crate::zones::constraint::{Clock, Constraint, Limit, Relation};
 
 use super::literal::Literal;
 
@@ -69,15 +69,15 @@ pub enum Expression {
 }
 
 impl Expression {
-    pub fn new_clock_constraint(operand: Self, comparison: Comparison, limit: Expression) -> Self {
+    pub fn new_clock_constraint(operand: Self, comparison: Comparison, limit: Self) -> Self {
         Self::ClockConstraint(Box::new(operand), comparison, Box::new(limit))
     }
 
     pub fn not(self) -> Self {
-        Expression::Unary(Unary::LogicalNegation, Box::new(self))
+        Self::Unary(Unary::LogicalNegation, Box::new(self))
     }
 
-    pub fn left_fold_binary(expressions: Vec<Expression>, binary: Binary) -> Expression {
+    pub fn left_fold_binary(expressions: Vec<Self>, binary: Binary) -> Self {
         if expressions.is_empty() {
             panic!()
         }
@@ -96,7 +96,7 @@ impl Expression {
         result
     }
 
-    pub fn conjoin(self, rhs: Vec<Expression>) -> Expression {
+    pub fn conjoin(self, rhs: Vec<Self>) -> Self {
         if rhs.is_empty() {
             return self;
         }
@@ -106,7 +106,7 @@ impl Expression {
         Self::conjunction(expressions)
     }
 
-    pub fn disjoin(self, rhs: Vec<Expression>) -> Expression {
+    pub fn disjoin(self, rhs: Vec<Self>) -> Self {
         if rhs.is_empty() {
             return self;
         }
@@ -116,12 +116,12 @@ impl Expression {
         Self::disjunction(expressions)
     }
 
-    pub fn conjunction(expressions: Vec<Expression>) -> Expression {
-        Expression::left_fold_binary(expressions, Binary::Conjunction)
+    pub fn conjunction(expressions: Vec<Self>) -> Self {
+        Self::left_fold_binary(expressions, Binary::Conjunction)
     }
 
-    pub fn disjunction(expressions: Vec<Expression>) -> Expression {
-        Expression::left_fold_binary(expressions, Binary::Disjunction)
+    pub fn disjunction(expressions: Vec<Self>) -> Self {
+        Self::left_fold_binary(expressions, Binary::Disjunction)
     }
 }
 

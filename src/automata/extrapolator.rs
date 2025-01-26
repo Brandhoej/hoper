@@ -1,22 +1,16 @@
-use crate::zones::{
-    bounds::Bounds,
-    dbm::{Canonical, Unsafe, DBM},
+use crate::{
+    automata::expressions::Comparison,
+    zones::{
+        bounds::Bounds,
+        constraint::Relation,
+        dbm::{Canonical, Dirty, Unsafe, DBM},
+    },
 };
 
-use super::expressions::Expression;
-
-/// An `Extrapolation` describes the maximum reachable bounds.
-/// These can be found using different strategies depending on performance
-/// requirements. Maybe diagonal constraints are ignored and just
-/// lower/upper bounds are taken into consideration.
-///
-/// TODO: Consider storing bounds on zones and reusing them for a following extrapolation.
-pub enum Extrapolation {
-    /// Takes diagonal constraints into account but does zone extrapolation
-    /// on the fly. Meaning that no information regarding minimum zones are
-    /// stored to make the proceeding extrapolations more effecient.
-    DifferenceOnTheFly,
-}
+use super::{
+    expressions::{Binary, Expression},
+    literal::Literal,
+};
 
 /// The range of clocks can in theory be unbounded, meaning that a clock can run
 /// indefinitely, taking any real value. This means that one can stay at a location for
@@ -40,16 +34,236 @@ pub enum Extrapolation {
 /// it, which describes an over-approximated zone reachable in the location. Then when an edge is
 /// traversed the extrapolated zone is further restricted (and still convex).
 pub struct Extrapolator {
-    extrapolation: Extrapolation,
+    stack: Vec<Literal>,
 }
 
 impl Extrapolator {
+    pub fn empty() -> Self {
+        Self { stack: Vec::new() }
+    }
+
+    pub fn bounds(&mut self, bounds: Bounds, expression: &Expression) -> Bounds {
+        match expression {
+            Expression::Unary(unary, expression) => {
+                let bounds = self.bounds(bounds, expression);
+                let value = self.stack.pop().unwrap();
+
+                match unary {
+                    super::expressions::Unary::LogicalNegation => {
+                        let negation = Literal::Boolean(!value.boolean().unwrap());
+                        self.stack.push(negation);
+                        return bounds.negation();
+                    }
+                }
+            }
+            Expression::Binary(lhs, binary, rhs) => match binary {
+                Binary::Conjunction => {
+                    let lhs_bounds = self.bounds(bounds.clone(), lhs);
+                    let lhs_bool = self.stack.pop().unwrap().boolean().unwrap();
+
+                    if !lhs_bool {
+                        self.stack.push(Literal::new_false());
+                        return Bounds::empty();
+                    }
+
+                    let rhs_bounds = self.bounds(bounds, rhs);
+                    let rhs_bool = self.stack.pop().unwrap().boolean().unwrap();
+
+                    if !rhs_bool {
+                        self.stack.push(Literal::new_false());
+                        return Bounds::empty();
+                    }
+
+                    self.stack.push(Literal::new_true());
+                    lhs_bounds.tighten_all(rhs_bounds.into_iter())
+                }
+                Binary::Disjunction => {
+                    let lhs_bounds = self.bounds(bounds.clone(), lhs);
+                    let lhs_bool = self.stack.pop().unwrap().boolean().unwrap();
+
+                    let rhs_bounds = self.bounds(bounds.clone(), rhs);
+                    let rhs_bool = self.stack.pop().unwrap().boolean().unwrap();
+
+                    self.stack.push(Literal::new_boolean(lhs_bool || rhs_bool));
+
+                    return if lhs_bool && rhs_bool {
+                        lhs_bounds.loosen_all(rhs_bounds.into_iter())
+                    } else if lhs_bool {
+                        lhs_bounds
+                    } else if rhs_bool {
+                        rhs_bounds
+                    } else {
+                        Bounds::empty()
+                    };
+                }
+            },
+            Expression::Group(expression) => self.bounds(bounds, expression),
+            Expression::Literal(literal) => {
+                self.stack.push(literal.clone());
+                Bounds::empty()
+            }
+            Expression::ClockConstraint(operand, comparison, limit) => {
+                self.bounds(bounds.clone(), &operand);
+                let clock = self.stack.pop().unwrap().clock().unwrap();
+
+                self.bounds(bounds.clone(), &limit);
+                let limit_literal = self.stack.pop().unwrap().i16().unwrap();
+
+                match comparison {
+                    Comparison::LessThanOrEqual => {
+                        bounds.tighten_upper(clock, Relation::weak(limit_literal))
+                    }
+                    Comparison::LessThan => {
+                        bounds.tighten_upper(clock, Relation::strict(limit_literal))
+                    }
+                    Comparison::Equal => bounds.set_limit(clock, limit_literal),
+                    Comparison::GreaterThanOrEqual => {
+                        bounds.tighten_lower(clock, Relation::weak(-limit_literal))
+                    }
+                    Comparison::GreaterThan => {
+                        bounds.tighten_lower(clock, Relation::strict(-limit_literal))
+                    }
+                }
+            }
+            Expression::DiagonalClockConstraint(minuend, subtrahend, comparison, limit) => {
+                self.bounds(bounds.clone(), &minuend);
+                let minuend_clock = self.stack.pop().unwrap().clock().unwrap();
+
+                self.bounds(bounds.clone(), &subtrahend);
+                let subtrahend_clock = self.stack.pop().unwrap().clock().unwrap();
+
+                self.bounds(bounds.clone(), &limit);
+                let limit_literal = self.stack.pop().unwrap().i16().unwrap();
+
+                match comparison {
+                    Comparison::LessThanOrEqual => bounds.tighten(
+                        minuend_clock,
+                        subtrahend_clock,
+                        Relation::weak(limit_literal),
+                    ),
+                    Comparison::LessThan => bounds.tighten(
+                        minuend_clock,
+                        subtrahend_clock,
+                        Relation::strict(limit_literal),
+                    ),
+                    Comparison::Equal => {
+                        bounds.set_difference_limit(minuend_clock, subtrahend_clock, limit_literal)
+                    }
+                    Comparison::GreaterThanOrEqual => bounds.tighten(
+                        minuend_clock,
+                        subtrahend_clock,
+                        Relation::weak(-limit_literal),
+                    ),
+                    Comparison::GreaterThan => bounds.tighten(
+                        minuend_clock,
+                        subtrahend_clock,
+                        Relation::strict(-limit_literal),
+                    ),
+                }
+            }
+        }
+    }
+
     pub fn expression(
         &mut self,
-        mut dbm: DBM<Canonical>,
+        zone: DBM<Dirty>,
         expression: &Expression,
     ) -> Result<DBM<Canonical>, DBM<Unsafe>> {
-        let bounds = Bounds::empty();
-        dbm.extrapolate(bounds)
+        let bounds = self.bounds(Bounds::empty(), expression);
+        match zone.extrapolate(bounds) {
+            Ok(zone) => zone.clean(),
+            Err(zone) => Err(zone),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        automata::{
+            expressions::{Comparison, Expression},
+            literal::Literal,
+        },
+        zones::{
+            bounds::Bounds,
+            constraint::{Constraint, Relation},
+        },
+    };
+
+    use super::Extrapolator;
+
+    #[test]
+    fn extrapolate_clock_constraints() {
+        let tests: Vec<(Expression, Bounds)> = vec![
+            (
+                Expression::new_clock_constraint(
+                    Literal::new_clock(1).into(),
+                    Comparison::LessThanOrEqual,
+                    Literal::new_i16(10).into(),
+                ),
+                vec![
+                    Constraint::upper(1, Relation::weak(10)),
+                    Constraint::indefinite(2),
+                ]
+                .into(),
+            ),
+            (
+                Expression::new_clock_constraint(
+                    Literal::new_clock(1).into(),
+                    Comparison::LessThan,
+                    Literal::new_i16(10).into(),
+                ),
+                vec![
+                    Constraint::upper(1, Relation::strict(10)),
+                    Constraint::indefinite(2),
+                ]
+                .into(),
+            ),
+            (
+                Expression::new_clock_constraint(
+                    Literal::new_clock(1).into(),
+                    Comparison::Equal,
+                    Literal::new_i16(10).into(),
+                ),
+                vec![
+                    Constraint::upper(1, Relation::weak(10)),
+                    Constraint::lower(1, Relation::weak(-10)),
+                    Constraint::indefinite(2),
+                ]
+                .into(),
+            ),
+            (
+                Expression::new_clock_constraint(
+                    Literal::new_clock(1).into(),
+                    Comparison::GreaterThanOrEqual,
+                    Literal::new_i16(10).into(),
+                ),
+                vec![
+                    Constraint::lower(1, Relation::weak(-10)),
+                    Constraint::indefinite(1),
+                    Constraint::indefinite(2),
+                ]
+                .into(),
+            ),
+            (
+                Expression::new_clock_constraint(
+                    Literal::new_clock(1).into(),
+                    Comparison::GreaterThan,
+                    Literal::new_i16(10).into(),
+                ),
+                vec![
+                    Constraint::lower(1, Relation::strict(-10)),
+                    Constraint::indefinite(1),
+                    Constraint::indefinite(2),
+                ]
+                .into(),
+            ),
+        ];
+
+        for (expression, expected) in tests.into_iter() {
+            let mut extrapolator = Extrapolator::empty();
+            let actual = extrapolator.bounds(Bounds::delay(2), &expression);
+            assert_eq!(actual, expected);
+        }
     }
 }

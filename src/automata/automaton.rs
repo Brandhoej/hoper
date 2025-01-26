@@ -7,12 +7,11 @@ use petgraph::{
 };
 use symbol_table::Symbol;
 
-use crate::zones::{constraint::Clock, dbm::DBM};
+use crate::zones::constraint::Clock;
 
 use super::{
     action::Action,
     channel::Channel,
-    dep_extrapolator::DepExtrapolator,
     edge::Edge,
     ioa::IOA,
     location::Location,

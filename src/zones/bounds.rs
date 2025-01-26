@@ -3,9 +3,9 @@ use std::collections::{
     HashMap,
 };
 
-use super::constraint::{Clock, Relation, INFINITY, REFERENCE};
+use super::constraint::{Clock, Constraint, Limit, Relation, INFINITY, REFERENCE};
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Bounds {
     relations: HashMap<(Clock, Clock), Relation>,
 }
@@ -31,16 +31,17 @@ impl Bounds {
         bounds
     }
 
-    pub fn set(&mut self, i: Clock, j: Clock, relation: Relation) {
+    pub fn set(mut self, i: Clock, j: Clock, relation: Relation) -> Self {
         self.relations.insert((i, j), relation);
+        self
     }
 
-    pub fn set_lower(&mut self, clock: Clock, relation: Relation) {
-        self.set(REFERENCE, clock, relation);
+    pub fn set_lower(self, clock: Clock, relation: Relation) -> Self {
+        self.set(REFERENCE, clock, relation)
     }
 
-    pub fn set_upper(&mut self, clock: Clock, relation: Relation) {
-        self.set(clock, REFERENCE, relation);
+    pub fn set_upper(self, clock: Clock, relation: Relation) -> Self {
+        self.set(clock, REFERENCE, relation)
     }
 
     pub fn get(&self, i: Clock, j: Clock) -> Option<Relation> {
@@ -55,7 +56,7 @@ impl Bounds {
         self.get(REFERENCE, clock)
     }
 
-    pub fn tighten(&mut self, i: Clock, j: Clock, relation: Relation) {
+    pub fn tighten(mut self, i: Clock, j: Clock, relation: Relation) -> Self {
         match self.relations.entry((i, j)) {
             Entry::Occupied(mut occupied_entry) => {
                 occupied_entry.insert(*occupied_entry.get().min(&relation));
@@ -64,17 +65,28 @@ impl Bounds {
                 vacant_entry.insert(relation);
             }
         }
+        self
     }
 
-    pub fn tighten_upper(&mut self, clock: Clock, relation: Relation) {
-        self.tighten(clock, REFERENCE, relation);
+    pub fn tighten_upper(self, clock: Clock, relation: Relation) -> Self {
+        self.tighten(clock, REFERENCE, relation)
     }
 
-    pub fn tighten_lower(&mut self, clock: Clock, relation: Relation) {
-        self.tighten(REFERENCE, clock, relation);
+    pub fn tighten_lower(self, clock: Clock, relation: Relation) -> Self {
+        self.tighten(REFERENCE, clock, relation)
     }
 
-    pub fn loosen(&mut self, i: Clock, j: Clock, relation: Relation) {
+    pub fn set_limit(mut self, clock: Clock, limit: Limit) -> Self {
+        self = self.set_upper(clock, Relation::weak(limit));
+        self.set_lower(clock, Relation::weak(-limit))
+    }
+
+    pub fn set_difference_limit(mut self, i: Clock, j: Clock, limit: Limit) -> Self {
+        self = self.set(i, j, Relation::weak(limit));
+        self.set(j, i, Relation::weak(limit))
+    }
+
+    pub fn loosen(mut self, i: Clock, j: Clock, relation: Relation) -> Self {
         match self.relations.entry((i, j)) {
             Entry::Occupied(mut occupied_entry) => {
                 occupied_entry.insert(*occupied_entry.get().max(&relation));
@@ -83,36 +95,52 @@ impl Bounds {
                 vacant_entry.insert(relation);
             }
         }
+        self
     }
 
-    pub fn loosen_upper(&mut self, clock: Clock, relation: Relation) {
-        self.loosen(clock, REFERENCE, relation);
+    pub fn loosen_upper(self, clock: Clock, relation: Relation) -> Self {
+        self.loosen(clock, REFERENCE, relation)
     }
 
-    pub fn loosen_lower(&mut self, clock: Clock, relation: Relation) {
-        self.loosen(REFERENCE, clock, relation);
+    pub fn loosen_lower(self, clock: Clock, relation: Relation) -> Self {
+        self.loosen(REFERENCE, clock, relation)
     }
 
-    pub fn set_all(&mut self, bounds: impl Iterator<Item = ((Clock, Clock), Relation)>) {
+    pub fn set_all(mut self, bounds: impl Iterator<Item = ((Clock, Clock), Relation)>) -> Self {
         for ((i, j), relation) in bounds {
-            self.set(i, j, relation);
+            self = self.set(i, j, relation);
         }
+        self
     }
 
-    pub fn tighten_all(&mut self, bounds: impl Iterator<Item = ((Clock, Clock), Relation)>) {
+    pub fn tighten_all(mut self, bounds: impl Iterator<Item = ((Clock, Clock), Relation)>) -> Self {
         for ((i, j), relation) in bounds {
-            self.tighten(i, j, relation);
+            self = self.tighten(i, j, relation);
         }
+        self
     }
 
-    pub fn loosen_all(&mut self, bounds: impl Iterator<Item = ((Clock, Clock), Relation)>) {
+    pub fn loosen_all(mut self, bounds: impl Iterator<Item = ((Clock, Clock), Relation)>) -> Self {
         for ((i, j), relation) in bounds {
-            self.loosen(i, j, relation);
+            self = self.loosen(i, j, relation);
         }
+        self
+    }
+
+    pub fn negation(mut self) -> Self {
+        self.relations
+            .values_mut()
+            .for_each(|relation| *relation = relation.negation());
+        self
     }
 
     pub fn is_empty(&self) -> bool {
         self.relations.is_empty()
+    }
+
+    pub fn clear(mut self) -> Self {
+        self.relations.clear();
+        self
     }
 
     /// Returns the minimum required number of clocks a DBM should have for it
@@ -134,6 +162,20 @@ impl IntoIterator for Bounds {
 
     fn into_iter(self) -> Self::IntoIter {
         self.relations.into_iter()
+    }
+}
+
+impl From<Vec<Constraint>> for Bounds {
+    fn from(constraints: Vec<Constraint>) -> Self {
+        let mut bounds = Bounds::empty();
+        for constraint in constraints.into_iter() {
+            bounds = bounds.set(
+                constraint.minuend(),
+                constraint.subtrahend(),
+                constraint.relation(),
+            )
+        }
+        bounds
     }
 }
 
@@ -163,30 +205,29 @@ mod tests {
 
     #[test]
     fn bounds_tighten_delay() {
-        let mut bounds = Bounds::delay(2);
-        bounds.tighten_upper(1, Relation::weak(10));
+        let bounds = Bounds::delay(2).tighten_upper(1, Relation::weak(10));
         assert_eq!(bounds.upper(1).unwrap(), Relation::weak(10));
         assert_eq!(bounds.upper(2).unwrap(), INFINITY);
     }
 
     #[test]
     fn bounds_expand() {
-        let mut bounds = Bounds::empty();
-        bounds.set_lower(1, Relation::weak(-10));
-        bounds.set_upper(1, Relation::weak(20));
-        bounds.loosen_lower(1, Relation::weak(-5));
-        bounds.loosen_upper(1, Relation::weak(25));
+        let bounds = Bounds::empty()
+            .set_lower(1, Relation::weak(-10))
+            .set_upper(1, Relation::weak(20))
+            .loosen_lower(1, Relation::weak(-5))
+            .loosen_upper(1, Relation::weak(25));
         assert_eq!(bounds.upper(1).unwrap(), Relation::weak(25));
         assert_eq!(bounds.lower(1).unwrap(), Relation::weak(-5));
     }
 
     #[test]
     fn bounds_shrink() {
-        let mut bounds = Bounds::empty();
-        bounds.set_lower(1, Relation::weak(-5));
-        bounds.set_upper(1, Relation::weak(25));
-        bounds.tighten_lower(1, Relation::weak(-10));
-        bounds.tighten_upper(1, Relation::weak(20));
+        let bounds = Bounds::empty()
+            .set_lower(1, Relation::weak(-5))
+            .set_upper(1, Relation::weak(25))
+            .tighten_lower(1, Relation::weak(-10))
+            .tighten_upper(1, Relation::weak(20));
         assert_eq!(bounds.upper(1).unwrap(), Relation::weak(20));
         assert_eq!(bounds.lower(1).unwrap(), Relation::weak(-10));
     }

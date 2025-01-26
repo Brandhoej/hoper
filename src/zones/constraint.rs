@@ -538,20 +538,52 @@ impl fmt::Display for Relation {
 
 #[derive(Clone)]
 pub struct Constraint {
-    lhs: Clock,
-    rhs: Clock,
+    minuend: Clock,
+    subtrahend: Clock,
     relation: Relation,
 }
 
 impl Constraint {
-    pub const fn new(lhs: Clock, rhs: Clock, relation: Relation) -> Self {
-        Self { lhs, rhs, relation }
+    pub const fn new(minuend: Clock, subtrahend: Clock, relation: Relation) -> Self {
+        Self {
+            minuend,
+            subtrahend,
+            relation,
+        }
+    }
+
+    pub const fn upper(clock: Clock, relation: Relation) -> Self {
+        Self::new(clock, REFERENCE, relation)
+    }
+
+    pub const fn lower(clock: Clock, relation: Relation) -> Self {
+        Self::new(REFERENCE, clock, relation)
+    }
+
+    pub const fn indefinite(clock: Clock) -> Self {
+        Self::upper(clock, INFINITY)
+    }
+
+    pub fn minuend(&self) -> Clock {
+        self.minuend.clone()
+    }
+
+    pub fn subtrahend(&self) -> Clock {
+        self.subtrahend.clone()
+    }
+
+    pub fn relation(&self) -> Relation {
+        self.relation.clone()
     }
 }
 
 impl fmt::Display for Constraint {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} - {} {}", self.lhs, self.rhs, self.relation)
+        write!(
+            f,
+            "{} - {} {}",
+            self.minuend, self.subtrahend, self.relation
+        )
     }
 }
 

@@ -66,7 +66,10 @@ impl Federation {
             }
         }
 
-        self.dbms.push(dbm);
+        // If the dbm was not included in self then we append it.
+        if !self.remove_subsets(&dbm) {
+            self.dbms.push(dbm);
+        }
     }
 
     #[inline]
@@ -148,7 +151,20 @@ impl Federation {
 
     #[inline]
     pub fn is_subset(&self, other: &Self) -> bool {
+        if self
+            .dbms
+            .iter()
+            .all(|inner| other.dbms.iter().any(|outer| inner.is_subset_of(outer)))
+        {
+            return true;
+        }
+
         self.clone().subtraction(other).is_empty()
+    }
+
+    #[inline]
+    pub fn includes(&self, other: &Self) -> bool {
+        other.is_subset(self)
     }
 
     #[inline]
@@ -205,7 +221,7 @@ impl Federation {
         while i < self.len() {
             let (subset, superset) = self.dbms[i].relation(&other);
             if subset || (subset && superset) {
-                // The self dbm is a subset or equal of the other.
+                // The self dbm is a subset or equal to the other.
                 self.dbms.swap_remove(i);
             } else if superset {
                 // The self dbm is a superset of the other.
@@ -229,10 +245,7 @@ impl Federation {
         }
 
         for dbm in other.dbms {
-            // If the dbm was not included in self then we append it.
-            if !self.remove_subsets(&dbm) {
-                self.append(dbm);
-            }
+            self.append(dbm);
         }
     }
 
@@ -306,5 +319,14 @@ impl Federation {
 
     pub fn inverse(self) -> Self {
         Self::universe(self.clocks().unwrap()).subtraction(&self)
+    }
+}
+
+impl From<DBM<Canonical>> for Federation {
+    fn from(dbm: DBM<Canonical>) -> Self {
+        if dbm.is_empty() {
+            return Federation::empty(dbm.clocks());
+        }
+        Federation::new(vec![dbm])
     }
 }
