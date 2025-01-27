@@ -2,10 +2,7 @@ use std::collections::HashSet;
 
 use symbol_table::Symbol;
 
-use crate::{
-    sets::{are_disjoint, intersection, skip_nth, subtract, union},
-    zones::constraint::Clock,
-};
+use crate::sets::{are_disjoint, intersection, skip_nth, subtract, union};
 
 use super::{
     action::Action,
@@ -53,22 +50,29 @@ use super::{
 ///
 /// Parallel composition over multiple automata can be extended similarly, as `Aⁱ = (((A¹ ∥ A²) ∥ A³) ...)`.
 pub struct Composition {
-    tioas: Vec<Box<Specification>>,
+    tiotas: Vec<Box<Specification>>,
     inputs: HashSet<Action>,
     outputs: HashSet<Action>,
+    clocks: HashSet<Symbol>,
     unique_actions: Vec<HashSet<Action>>,
     common_actions: HashSet<Action>,
 }
 
 impl Composition {
-    pub fn new(tiota: Vec<Box<Specification>>) -> Result<Self, ()> {
-        if tiota.len() < 2 {
+    pub fn new(tioas: Vec<Box<Specification>>) -> Result<Self, ()> {
+        if tioas.len() < 2 {
             return Err(());
         }
 
-        let all_outputs = tiota.iter().map(|tioas| tioas.outputs());
-        let all_inputs = tiota.iter().map(|tioas| tioas.inputs());
-        let all_actions = tiota.iter().map(|tioas| tioas.actions());
+        let all_outputs = tioas.iter().map(|tioa| tioa.outputs());
+        let all_inputs = tioas.iter().map(|tioa| tioa.inputs());
+        let all_actions = tioas.iter().map(|tioa| tioa.actions());
+        let all_clocks = tioas.iter().map(|tioa| tioa.clocks());
+
+        // For `Clk₁ ⊎ Clk₂` to hold then they must be disjoint.
+        if !are_disjoint(&all_clocks) {
+            return Err(());
+        }
 
         // `Act¹ₒ ∩ Act²ₒ = ∅`
         if !are_disjoint(&all_outputs) {
@@ -100,23 +104,27 @@ impl Composition {
         // `a ∈ Act¹ ∩ Act²`
         let common_actions = intersection(all_actions).collect();
 
+        // `Clk₁ ⊎ Clk₂`
+        let clocks = union(all_clocks).collect();
+
         Ok(Self {
-            tioas: tiota,
+            tiotas: tioas,
             inputs,
             outputs,
+            clocks,
             unique_actions,
             common_actions,
         })
     }
 
     pub fn size(&self) -> usize {
-        self.tioas.len()
+        self.tiotas.len()
     }
 }
 
 impl TA for Composition {
-    fn clocks(&self) -> Clock {
-        self.tioas.iter().map(|tioa| tioa.clocks()).sum()
+    fn clocks(&self) -> HashSet<Symbol> {
+        self.clocks.clone()
     }
 }
 
@@ -133,7 +141,7 @@ impl IOA for Composition {
 impl TIOA for Composition {
     fn initial_location(&self) -> LocationTree {
         LocationTree::new_branch(
-            self.tioas
+            self.tiotas
                 .iter()
                 .map(|tioa| tioa.initial_location())
                 .collect(),
@@ -150,7 +158,7 @@ impl TIOA for Composition {
             // Therefore, the transition happens for all simultaneously.
             if self.common_actions.contains(&action) {
                 let moves = self
-                    .tioas
+                    .tiotas
                     .iter()
                     .enumerate()
                     .map(|(i, tioas)| tioas.outgoing(&sources[i], action).unwrap());
@@ -161,7 +169,7 @@ impl TIOA for Composition {
             // Is this santiy check guaranteed if the action is in the automaton's actions?
             // Used to short-circuit the automaton's unique action contains check if it was found.
             let mut found_unique = false;
-            let moves = self.tioas.iter().enumerate().map(|(i, tioas)| {
+            let moves = self.tiotas.iter().enumerate().map(|(i, tioas)| {
                 // Either the action is unique to the automaton or not.
                 // If it is unique to the automaton then we move from it.
                 // Otherwise, we stay put at the same location as we came from.
@@ -187,7 +195,7 @@ impl TIOA for Composition {
             let sub_locations = locations
                 .iter()
                 .enumerate()
-                .map(|(i, location)| self.tioas[i].location(location));
+                .map(|(i, location)| self.tiotas[i].location(location));
 
             if sub_locations
                 .clone()

@@ -7,7 +7,7 @@ pub struct Interpreter {
 }
 
 impl Interpreter {
-    pub fn empty() -> Self {
+    pub fn new() -> Self {
         Self { stack: Vec::new() }
     }
 
@@ -32,7 +32,7 @@ impl Interpreter {
                 zone
             }
             Statement::FreeClock(clock) => {
-                zone.free(*clock);
+                // zone.free(*clock);
                 zone
             }
         }

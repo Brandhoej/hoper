@@ -1,10 +1,12 @@
-use crate::zones::constraint::{Clock, REFERENCE};
+use std::fmt::Display;
+
+use symbol_table::Symbol;
 
 #[derive(Clone, Debug)]
 pub enum Literal {
     Boolean(bool),
-    Clock(Clock),
     I16(i16),
+    Identifier(Symbol),
 }
 
 impl Literal {
@@ -24,13 +26,8 @@ impl Literal {
     }
 
     #[inline]
-    pub const fn new_clock(clock: Clock) -> Self {
-        Self::Clock(clock)
-    }
-
-    #[inline]
-    pub const fn new_reference_clock() -> Self {
-        Self::new_clock(REFERENCE)
+    pub const fn new_identifier(clock: Symbol) -> Self {
+        Self::Identifier(clock)
     }
 
     #[inline]
@@ -47,9 +44,9 @@ impl Literal {
     }
 
     #[inline]
-    pub const fn clock(&self) -> Option<Clock> {
-        if let Self::Clock(clock) = self {
-            return Some(*clock);
+    pub const fn identifier(&self) -> Option<Symbol> {
+        if let Self::Identifier(ident) = self {
+            return Some(*ident);
         }
         None
     }
@@ -66,5 +63,15 @@ impl Literal {
 impl From<bool> for Literal {
     fn from(value: bool) -> Self {
         Self::new_boolean(value)
+    }
+}
+
+impl Display for Literal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Literal::Boolean(boolean) => write!(f, "{}", *boolean),
+            Literal::I16(number) => write!(f, "{}", *number),
+            Literal::Identifier(ident) => write!(f, "{:?}", *ident),
+        }
     }
 }

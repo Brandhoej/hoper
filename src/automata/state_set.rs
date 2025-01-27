@@ -16,7 +16,7 @@ impl StateSet {
     }
 
     pub fn insert(&mut self, state: State) {
-        let (location, zone) = state.decompose();
+        let (location, zone, _) = state.decompose();
         if let Some(federation) = self.states.get_mut(&location) {
             federation.append(zone);
         } else {
@@ -34,7 +34,7 @@ impl StateSet {
     }
 
     pub fn contains(&self, state: State) -> bool {
-        let (location, zone) = state.decompose();
+        let (location, zone, _) = state.decompose();
         if let Some(federation) = self.states.get(&location) {
             federation.includes(&zone.into())
         } else {

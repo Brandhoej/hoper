@@ -137,11 +137,7 @@ impl Display for Expression {
             Expression::Unary(operator, operand) => write!(f, "{}{}", operator, operand),
             Expression::Binary(lhs, operator, rhs) => write!(f, "{}{}{}", lhs, operator, rhs),
             Expression::Group(expression) => write!(f, "({})", expression),
-            Expression::Literal(value) => match value {
-                Literal::Boolean(value) => write!(f, "{}", *value),
-                Literal::Clock(clock) => write!(f, "{}", *clock),
-                Literal::I16(value) => write!(f, "{}", *value),
-            },
+            Expression::Literal(literal) => write!(f, "{}", literal),
             Expression::ClockConstraint(operand, comparison, bound) => {
                 write!(f, "{} {} {}", *operand, comparison, bound)
             }

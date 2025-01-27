@@ -6,6 +6,7 @@ pub mod composition;
 pub mod conversion;
 pub mod ecdar_university_test;
 pub mod edge;
+pub mod environment;
 pub mod expressions;
 pub mod extrapolator;
 pub mod implementation;

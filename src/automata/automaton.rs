@@ -7,8 +7,6 @@ use petgraph::{
 };
 use symbol_table::Symbol;
 
-use crate::zones::constraint::Clock;
-
 use super::{
     action::Action,
     channel::Channel,
@@ -26,12 +24,17 @@ use super::{
 pub struct Automaton {
     initial: NodeIndex,
     graph: DiGraph<Location, Edge>,
+    clocks: HashSet<Symbol>,
     inputs: HashSet<Action>,
     outputs: HashSet<Action>,
 }
 
 impl Automaton {
-    pub fn new(initial: NodeIndex, graph: DiGraph<Location, Edge>) -> Result<Self, ()> {
+    pub fn new(
+        initial: NodeIndex,
+        graph: DiGraph<Location, Edge>,
+        clocks: HashSet<Symbol>,
+    ) -> Result<Self, ()> {
         let mut inputs = HashSet::new();
         let mut outputs = HashSet::new();
 
@@ -49,6 +52,7 @@ impl Automaton {
         Ok(Self {
             initial,
             graph,
+            clocks,
             inputs,
             outputs,
         })
@@ -185,8 +189,8 @@ impl Automaton {
 }
 
 impl TA for Automaton {
-    fn clocks(&self) -> Clock {
-        1 // FIXME
+    fn clocks(&self) -> HashSet<Symbol> {
+        self.clocks.clone()
     }
 }
 
@@ -229,6 +233,8 @@ impl TIOA for Automaton {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use petgraph::graph::DiGraph;
     use symbol_table::SymbolTable;
 
@@ -255,7 +261,7 @@ mod tests {
             ),
         );
 
-        let tioa = Automaton::new(node_a, graph).unwrap();
+        let tioa = Automaton::new(node_a, graph, HashSet::new()).unwrap();
         assert_eq!(tioa.initial(), node_a);
 
         assert_eq!(tioa.in_degree(node_a), 0);

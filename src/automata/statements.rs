@@ -1,8 +1,7 @@
 use std::fmt::{self, Display};
 
 use itertools::Itertools;
-
-use crate::zones::constraint::Clock;
+use symbol_table::Symbol;
 
 use super::expressions::Expression;
 
@@ -11,7 +10,7 @@ pub enum Statement {
     Sequence(Vec<Statement>),
     Branch(Vec<Statement>),
     Expression(Expression),
-    FreeClock(Clock),
+    FreeClock(Symbol),
 }
 
 impl Display for Statement {
@@ -31,7 +30,7 @@ impl Display for Statement {
                 let join = statements.iter().map(ToString::to_string).join(separator);
                 write!(f, "{}", join)
             }
-            Statement::FreeClock(clock) => writeln!(f, "{}", clock),
+            Statement::FreeClock(clock) => writeln!(f, "{:?}", clock),
         }
     }
 }

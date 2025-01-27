@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::zones::constraint::Clock;
+use symbol_table::Symbol;
 
 use super::{
     action::Action,
@@ -30,7 +30,7 @@ impl Specification {
 }
 
 impl TA for Specification {
-    fn clocks(&self) -> Clock {
+    fn clocks(&self) -> HashSet<Symbol> {
         self.0.clocks()
     }
 }
@@ -61,6 +61,8 @@ impl TIOA for Specification {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use petgraph::graph::DiGraph;
     use symbol_table::SymbolTable;
 
@@ -88,7 +90,7 @@ mod tests {
             ),
         );
 
-        let tioa = Automaton::new(node_a, graph).unwrap();
+        let tioa = Automaton::new(node_a, graph, HashSet::new()).unwrap();
         let specification = tioa.is_input_enabled().unwrap();
     }
 }

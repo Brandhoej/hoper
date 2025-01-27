@@ -1,13 +1,14 @@
 use crate::{
     automata::extrapolator::Extrapolator,
     zones::{
-        bounds::Bounds,
+        constraint::Clock,
         dbm::{Canonical, DBM},
     },
 };
 
 use super::{
     action::Action,
+    environment::Environment,
     interpreter::Interpreter,
     ioa::IOA,
     ta::TA,
@@ -18,11 +19,20 @@ use super::{
 pub struct State {
     location: LocationTree,
     zone: DBM<Canonical>,
+    environment: Environment,
 }
 
 impl State {
-    pub const fn new(location: LocationTree, zone: DBM<Canonical>) -> Self {
-        Self { location, zone }
+    pub const fn new(
+        location: LocationTree,
+        zone: DBM<Canonical>,
+        environment: Environment,
+    ) -> Self {
+        Self {
+            location,
+            zone,
+            environment,
+        }
     }
 
     pub const fn location(&self) -> &LocationTree {
@@ -33,8 +43,8 @@ impl State {
         &self.zone
     }
 
-    pub fn decompose(self) -> (LocationTree, DBM<Canonical>) {
-        (self.location, self.zone)
+    pub fn decompose(self) -> (LocationTree, DBM<Canonical>, Environment) {
+        (self.location, self.zone, self.environment)
     }
 }
 
@@ -104,9 +114,9 @@ impl<T: ?Sized + TIOA> TIOTS for T {
     fn initial_state(&self) -> State {
         let location = self.initial_location();
         let invariant = self.location(&self.initial_location()).unwrap().invariant();
-        let zone = DBM::universe(self.clocks());
-        match Extrapolator::empty().expression(zone.dirty(), &invariant) {
-            Ok(zone) => State::new(location, zone),
+        let zone = DBM::universe(self.clocks().len() as Clock);
+        match Extrapolator::new().expression(zone.dirty(), &invariant) {
+            Ok(zone) => State::new(location, zone, self.into()),
             Err(_) => panic!("a TIOTS should have an initial state"),
         }
     }
@@ -117,8 +127,8 @@ impl<T: ?Sized + TIOA> TIOTS for T {
         moves: impl Iterator<Item = Move>,
     ) -> impl Iterator<Item = Transition> {
         let is_empty = source.zone.is_empty();
-        let mut extrapolator = Extrapolator::empty();
-        let mut interpreter = Interpreter::empty();
+        let mut extrapolator = Extrapolator::new();
+        let mut interpreter = Interpreter::new();
 
         moves
             .filter_map(move |m| {
@@ -151,7 +161,8 @@ impl<T: ?Sized + TIOA> TIOTS for T {
                     Err(_) => return None,
                 }
 
-                let destination = State::new(m.location().clone(), zone);
+                let destination =
+                    State::new(m.location().clone(), zone, source.environment.clone());
 
                 Some(match m {
                     Move::To { edge, .. } => {

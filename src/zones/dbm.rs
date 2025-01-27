@@ -117,6 +117,12 @@ impl<State: DBMState> DBM<State> {
         self.relations[index] = relation
     }
 
+    pub fn delay(&mut self, limit: Limit) {
+        for clock in REFERENCE+1..self.dimensions() {
+            self.set_upper(clock, self.upper(clock).extend(limit));
+        }
+    }
+
     /// The up operation computes the strongest postcondition of a zone with respect to delay.
     /// Afterwards the DBM contains the clock assignments that can be reached from by delay.
     /// up(D) = {u + d | u ∈ D, d ∈ ℝ+}.
@@ -364,9 +370,6 @@ impl DBM<Canonical> {
 
                 let lhs = self.diagonal(i, j);
                 let rhs = other.diagonal(i, j);
-
-                let lhs_str = lhs.to_string();
-                let rhs_str = rhs.to_string();
 
                 subset = subset && (lhs <= rhs);
                 superset = superset && (lhs >= rhs);
@@ -841,6 +844,8 @@ impl DBM<Dirty> {
         }
     }
 
+    // TODO: Should also return the delay which was applied. Such that for bounds
+    // only affecting the upper bounds should be the same as just delaying the DBM.
     pub fn extrapolate(mut self, bounds: Bounds) -> Result<Self, DBM<Unsafe>> {
         if let Some(clocks) = bounds.clocks() {
             // Check if the bounds describe a DBM with more clocks.
@@ -931,7 +936,7 @@ mod tests {
 
     use crate::zones::{
         bounds::Bounds,
-        constraint::{Relation, RelationsSample, Strictness, UniformRelations},
+        constraint::{Limit, Relation, RelationsSample, Strictness, UniformRelations},
     };
 
     use super::{Canonical, Dirty, DBM};
@@ -1193,5 +1198,14 @@ mod tests {
                 .fmt_conjunctions(&vec!["x", "y"]),
             "-x ≤ -10 ∧ x < 20 ∧ x - y < 10 ∧ -y ≤ -10 ∧ y < 20 ∧ y - x < 10"
         );
+    }
+
+    #[test]
+    fn delay() {
+        let mut zone = dbm1();
+        zone.delay(10);
+        let conjunctions = zone.fmt_conjunctions(&vec!["x", "y"]);
+
+        assert_eq!(conjunctions, "");
     }
 }

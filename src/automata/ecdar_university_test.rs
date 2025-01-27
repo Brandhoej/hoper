@@ -1,5 +1,7 @@
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use petgraph::graph::DiGraph;
     use symbol_table::SymbolTable;
 
@@ -25,7 +27,7 @@ mod tests {
         let grant_symbol = symbols.intern("grant");
         let news_symbol = symbols.intern("grant");
 
-        let clock = 1;
+        let clock = symbols.intern("clock");
 
         let grant_action = Action::new(grant_symbol);
         let news_action = Action::new(news_symbol);
@@ -37,7 +39,7 @@ mod tests {
             slow_symbol,
             // u <= 20
             Expression::new_clock_constraint(
-                Literal::new_clock(clock).into(),
+                Literal::new_identifier(clock).into(),
                 Comparison::LessThanOrEqual,
                 Literal::new_i16(20).into(),
             ),
@@ -49,7 +51,7 @@ mod tests {
             Edge::new_input(
                 grant_action,
                 Expression::new_clock_constraint(
-                    Literal::new_clock(clock).into(),
+                    Literal::new_identifier(clock).into(),
                     Comparison::GreaterThan,
                     Literal::new_i16(2).into(),
                 ),
@@ -75,7 +77,7 @@ mod tests {
             Edge::new_input(
                 grant_action,
                 Expression::new_clock_constraint(
-                    Literal::new_clock(clock).into(),
+                    Literal::new_identifier(clock).into(),
                     Comparison::LessThanOrEqual,
                     Literal::new_i16(2).into(),
                 ),
@@ -99,7 +101,12 @@ mod tests {
             ),
         );
 
-        Automaton::new(waiting_node, graph).unwrap()
+        Automaton::new(
+            waiting_node,
+            graph,
+            HashSet::from_iter(vec![clock].into_iter()),
+        )
+        .unwrap()
     }
 
     #[test]

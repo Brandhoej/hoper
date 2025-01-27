@@ -271,8 +271,16 @@ impl Relation {
     }
 
     /// subtract other from self by "self + (-other)".
-    pub const fn subtract(&self, other: &Self) -> Self {
+    pub const fn subtraction(&self, other: &Self) -> Self {
         self.addition(&other.negation())
+    }
+
+    pub const fn extend(self, limit: Limit) -> Self {
+        Self::new(self.limit() + limit, self.strictness())
+    }
+
+    pub const fn shrink(self, limit: Limit) -> Self {
+        Self::new(self.limit() - limit, self.strictness())
     }
 }
 
@@ -306,7 +314,7 @@ impl Sub for Relation {
     type Output = Relation;
 
     fn sub(self, rhs: Self) -> Self::Output {
-        self.subtract(&rhs)
+        self.subtraction(&rhs)
     }
 }
 

@@ -1,29 +1,30 @@
-use std::collections::{HashSet, VecDeque};
+use std::{
+    collections::{HashSet, VecDeque},
+    iter,
+};
 
 use crate::{
     automata::tiots::TIOTS,
-    zones::
-        dbm::{Canonical, DBM}
-    ,
+    zones::dbm::{Canonical, DBM},
 };
 
 use super::{
-    action::Action, ioa::IOA, specification::Specification, state_set::StateSet,
-    tioa::LocationTree, tiots::State,
+    action::Action, environment::Environment, ioa::IOA, specification::Specification,
+    state_set::StateSet, tioa::LocationTree, tiots::State,
 };
 
 #[derive(Clone)]
 pub struct RefinementStatePair {
-    implementation: LocationTree,
-    specification: LocationTree,
+    implementation: (LocationTree, Environment),
+    specification: (LocationTree, Environment),
+    // Maybe this zone is actually a federation?
     zone: DBM<Canonical>,
 }
 
 impl RefinementStatePair {
     pub fn new(
-        implementation: LocationTree,
-        specification: LocationTree,
-        // Maybe this zone is actually a federation?
+        implementation: (LocationTree, Environment),
+        specification: (LocationTree, Environment),
         zone: DBM<Canonical>,
     ) -> Self {
         Self {
@@ -37,8 +38,10 @@ impl RefinementStatePair {
         // Rule 5 (Time consistency): When the implementation requires a delay so must the specification.
         // Whenever s -d->ᔆ s' for some s' ∈ Qᔆ and d ∈ ℝ≥0, then t -d->ᵀ t' and (s', t') ∈ R for some t' ∈ Qᵀ.
 
-        let (implementation_location, implementation_zone) = implementation.decompose();
-        let (specification_location, specification_zone) = specification.decompose();
+        let (implementation_location, implementation_zone, implementation_environment) =
+            implementation.decompose();
+        let (specification_location, specification_zone, specification_environment) =
+            specification.decompose();
 
         // Q: Maybe this check is completely redundant?
         // If the zone is empty then it is unsafe.
@@ -51,10 +54,11 @@ impl RefinementStatePair {
         }
 
         // Only the clock valuations where the implementation can transition should the specification also transition.
+        // FIXME: The intersection only has to consider the shared clocks.
         if let Some(intersection) = implementation_zone.intersection(&specification_zone) {
             Ok(Self::new(
-                implementation_location,
-                specification_location,
+                (implementation_location, implementation_environment),
+                (specification_location, specification_environment),
                 intersection,
             ))
         } else {
@@ -64,11 +68,11 @@ impl RefinementStatePair {
         }
     }
 
-    pub fn implementation(&self) -> LocationTree {
+    pub fn implementation(&self) -> (LocationTree, Environment) {
         self.implementation.clone()
     }
 
-    pub fn specification(&self) -> LocationTree {
+    pub fn specification(&self) -> (LocationTree, Environment) {
         self.specification.clone()
     }
 
@@ -77,20 +81,13 @@ impl RefinementStatePair {
     }
 
     pub fn implementation_state(&self) -> State {
-        State::new(self.implementation.clone(), self.zone.clone())
+        let (location, environment) = self.implementation.clone();
+        State::new(location, self.zone.clone(), environment)
     }
 
     pub fn specification_state(&self) -> State {
-        State::new(self.specification.clone(), self.zone.clone())
-    }
-}
-
-impl From<RefinementStatePair> for State {
-    fn from(value: RefinementStatePair) -> Self {
-        Self::new(
-            LocationTree::new_branch(vec![value.implementation, value.specification]),
-            value.zone,
-        )
+        let (location, environment) = self.specification.clone();
+        State::new(location, self.zone.clone(), environment)
     }
 }
 
@@ -186,7 +183,7 @@ impl Refinement {
         // An example where work is shared between threads can be seen here:
         // https://docs.rs/crossbeam/latest/crossbeam/deque/index.html
 
-        let mut passed: StateSet = StateSet::new();
+        /*let mut passed: StateSet = StateSet::new();
         let mut worklist: VecDeque<RefinementStatePair> = VecDeque::new();
 
         // (qᔆ₀, qᵀ₀) ∈ R
@@ -247,7 +244,7 @@ impl Refinement {
                 }
 
                 states.push((
-                    Box::new(Box::new(std::iter::once(pair.implementation_state()))),
+                    Box::new(Box::new(iter::once(pair.implementation_state()))),
                     Box::new(specification_states),
                 ));
             }
@@ -300,7 +297,7 @@ impl Refinement {
 
                 states.push((
                     Box::new(implementation_states),
-                    Box::new(Box::new(std::iter::once(pair.specification_state()))),
+                    Box::new(Box::new(iter::once(pair.specification_state()))),
                 ));
             }
 
@@ -324,7 +321,7 @@ impl Refinement {
                     }
                 }
             }
-        }
+        }*/
 
         true
     }
