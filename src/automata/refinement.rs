@@ -3,91 +3,55 @@ use std::{
     iter,
 };
 
-use crate::{
-    automata::tiots::TIOTS,
-    zones::dbm::{Canonical, DBM},
-};
+use itertools::Itertools;
+
+use crate::automata::tiots::TIOTS;
 
 use super::{
-    action::Action, environment::Environment, ioa::IOA, specification::Specification,
-    state_set::StateSet, tioa::LocationTree, tiots::State,
+    action::Action, ioa::IOA, specification::Specification, state_set::StateSet, tiots::State,
 };
 
 #[derive(Clone)]
 pub struct RefinementStatePair {
-    implementation: (LocationTree, Environment),
-    specification: (LocationTree, Environment),
-    // Maybe this zone is actually a federation?
-    zone: DBM<Canonical>,
+    implementation: State,
+    specification: State,
 }
 
 impl RefinementStatePair {
-    pub fn new(
-        implementation: (LocationTree, Environment),
-        specification: (LocationTree, Environment),
-        zone: DBM<Canonical>,
-    ) -> Self {
+    pub fn new(implementation: State, specification: State) -> Self {
         Self {
             implementation,
             specification,
-            zone,
         }
     }
 
-    pub fn from_states(implementation: State, specification: State) -> Result<Self, ()> {
+    pub fn from_states(implementation: State, mut specification: State) -> Result<Self, ()> {
         // Rule 5 (Time consistency): When the implementation requires a delay so must the specification.
         // Whenever s -d->ᔆ s' for some s' ∈ Qᔆ and d ∈ ℝ≥0, then t -d->ᵀ t' and (s', t') ∈ R for some t' ∈ Qᵀ.
 
-        let (implementation_location, implementation_zone, implementation_environment) =
-            implementation.decompose();
-        let (specification_location, specification_zone, specification_environment) =
-            specification.decompose();
-
-        // Q: Maybe this check is completely redundant?
-        // If the zone is empty then it is unsafe.
-        if implementation_zone.is_empty() {
+        // The specification cannot match the implementation's delay.
+        let specification_delay = specification.ref_zone().delays();
+        let implementation_delay = implementation.ref_zone().delays();
+        if specification_delay < implementation_delay {
             return Err(());
         }
 
-        if specification_zone.is_empty() {
-            return Err(());
+        // The specification delays more than the implementation. But it should only at the maximum match the delay.
+        if specification_delay > implementation_delay {
+            specification
+                .mut_zone()
+                .delay(implementation_delay - specification_delay);
         }
 
-        // Only the clock valuations where the implementation can transition should the specification also transition.
-        // FIXME: The intersection only has to consider the shared clocks.
-        if let Some(intersection) = implementation_zone.intersection(&specification_zone) {
-            Ok(Self::new(
-                (implementation_location, implementation_environment),
-                (specification_location, specification_environment),
-                intersection,
-            ))
-        } else {
-            // This happens when the implementation zone and specification zone are different.
-            // When that is the case then there is no intersection.
-            return Err(());
-        }
+        Ok(Self::new(implementation, specification))
     }
 
-    pub fn implementation(&self) -> (LocationTree, Environment) {
-        self.implementation.clone()
+    pub fn implementation(&self) -> &State {
+        &self.implementation
     }
 
-    pub fn specification(&self) -> (LocationTree, Environment) {
-        self.specification.clone()
-    }
-
-    pub fn federation(&self) -> &DBM<Canonical> {
-        &self.zone
-    }
-
-    pub fn implementation_state(&self) -> State {
-        let (location, environment) = self.implementation.clone();
-        State::new(location, self.zone.clone(), environment)
-    }
-
-    pub fn specification_state(&self) -> State {
-        let (location, environment) = self.specification.clone();
-        State::new(location, self.zone.clone(), environment)
+    pub fn specification(&self) -> &State {
+        &self.specification
     }
 }
 
@@ -107,6 +71,8 @@ impl Refinement {
         implementation: Box<Specification>,
         specification: Box<Specification>,
     ) -> Result<Self, ()> {
+        // FIXME: Only consider
+
         // Actᔆᵢ ∩ Actᵀₒ = ∅
         if !implementation
             .inputs()
@@ -172,18 +138,35 @@ impl Refinement {
     }
 
     pub fn initial(&self) -> Result<RefinementStatePair, ()> {
+        let implementation_state = self.implementation.initial_state();
+        if let Err(()) = implementation_state {
+            return Err(());
+        }
+
+        let specification_state = self.specification.initial_state();
+        if let Err(()) = specification_state {
+            return Err(());
+        }
+
         RefinementStatePair::from_states(
-            self.implementation.initial_state(),
-            self.specification.initial_state(),
+            implementation_state.unwrap(),
+            specification_state.unwrap(),
         )
     }
 
     pub fn refines(&self) -> bool {
+        // FIXME: Assumes that two edges which are not enabled under the same delays are valid pairs.
+        // Eg. The Specification has "0 -u<=2-> 1" and "0 -u>2-> 2" which are considered as a pair
+        // but they are not enabled under the same delay and therefore should not be considered as pairs.
+        // This check only has to be made when the action is common (both for inputs and outputs).
+        // Solution idea: Instead of two boxed iterators of states, then one iterator of a state tuple.
+
         // TODO: Use crossbeam to multi-thread the refinment check.
         // An example where work is shared between threads can be seen here:
         // https://docs.rs/crossbeam/latest/crossbeam/deque/index.html
 
-        /*let mut passed: StateSet = StateSet::new();
+        let mut implementation_passed: StateSet = StateSet::new();
+        let mut specification_passed: StateSet = StateSet::new();
         let mut worklist: VecDeque<RefinementStatePair> = VecDeque::new();
 
         // (qᔆ₀, qᵀ₀) ∈ R
@@ -193,30 +176,25 @@ impl Refinement {
         };
 
         while let Some(pair) = worklist.pop_front() {
-            let mut states: Vec<(
-                Box<dyn Iterator<Item = State>>,
-                Box<dyn Iterator<Item = State>>,
-            )> = Vec::new();
+            let mut states: Vec<Box<dyn Iterator<Item = (State, State)>>> = Vec::new();
 
             // Rule 1 (Common inputs): Both the specification and implementaion can react on the input.
             // Whenever t -i?->ᵀ t' for some t' ∈ Qᵀ and i? ∈ Actᵀᵢ ∩ Actᔆᵢ , then s -i?->ᔆ s' and (s', t') ∈ R for some s' ∈ Qᔆ
             for input in self.common_inputs.iter() {
-                let mut specification_states = self
+                let mut specification_edges = self
                     .specification
-                    .states_from(pair.specification_state(), *input)
-                    .unwrap()
+                    .enabled_edges(&pair.specification(), input)
                     .peekable();
 
                 // Only when the specification can react to the common input should
                 // the implementation also be able to react to the input.
-                if specification_states.peek().is_none() {
+                if specification_edges.peek().is_none() {
                     continue;
                 }
 
                 let mut implementation_states = self
                     .implementation
-                    .states_from(pair.implementation_state(), *input)
-                    .unwrap()
+                    .enabled_edges(&pair.implementation(), input)
                     .peekable();
 
                 // The implementation could not react to the input.
@@ -224,10 +202,11 @@ impl Refinement {
                     return false;
                 }
 
-                states.push((
-                    Box::new(implementation_states),
-                    Box::new(specification_states),
-                ));
+                todo!()
+                /*states.push(Box::new(Itertools::cartesian_product(
+                    implementation_states,
+                    specification_edges.collect::<Vec<_>>().into_iter(),
+                )));*/
             }
 
             // Rule 2 (Unique specification inputs): Only the specification reacts to the input.
@@ -235,18 +214,18 @@ impl Refinement {
             for input in self.unique_specification_inputs.iter() {
                 let mut specification_states = self
                     .specification
-                    .states_from(pair.specification_state(), *input)
-                    .unwrap()
+                    .enabled_edges(pair.specification(), input)
                     .peekable();
 
                 if specification_states.peek().is_none() {
                     continue;
                 }
 
-                states.push((
-                    Box::new(Box::new(iter::once(pair.implementation_state()))),
-                    Box::new(specification_states),
-                ));
+                todo!()
+                /*states.push(Box::new(Itertools::cartesian_product(
+                    iter::once(pair.implementation()),
+                    specification_states.collect::<Vec<_>>().into_iter(),
+                )));*/
             }
 
             // Rule 3 (Common outputs): Both the specification and implementaion can produce the output.
@@ -254,8 +233,7 @@ impl Refinement {
             for output in self.common_outputs.iter() {
                 let mut implementation_states = self
                     .implementation
-                    .states_from(pair.implementation_state(), *output)
-                    .unwrap()
+                    .enabled_edges(pair.implementation(), output)
                     .peekable();
 
                 // Only if the implementation can produce an output is it
@@ -267,8 +245,7 @@ impl Refinement {
                 // The specification should be able to produce the output since the implementation can.
                 let mut specification_states = self
                     .specification
-                    .states_from(pair.specification_state(), *output)
-                    .unwrap()
+                    .enabled_edges(pair.specification(), output)
                     .peekable();
 
                 // The specification could not prduce the outptu the implementation could.
@@ -276,10 +253,11 @@ impl Refinement {
                     return false;
                 }
 
-                states.push((
-                    Box::new(implementation_states),
-                    Box::new(specification_states),
-                ));
+                todo!()
+                /*states.push(Box::new(Itertools::cartesian_product(
+                    implementation_states,
+                    specification_states.collect::<Vec<_>>().into_iter(),
+                )));*/
             }
 
             // Rule 4 (Unique implementation outputs): Only the implementation can produce the output.
@@ -287,41 +265,46 @@ impl Refinement {
             for output in self.unique_implementation_outputs.iter() {
                 let mut implementation_states = self
                     .implementation
-                    .states_from(pair.implementation_state(), *output)
-                    .unwrap()
+                    .enabled_edges(pair.implementation(), output)
                     .peekable();
 
                 if implementation_states.peek().is_none() {
                     continue;
                 }
 
-                states.push((
-                    Box::new(implementation_states),
-                    Box::new(Box::new(iter::once(pair.specification_state()))),
-                ));
+                todo!()
+                /*states.push(Box::new(Itertools::cartesian_product(
+                    implementation_states,
+                    vec![pair.specification()].into_iter(),
+                )));*/
             }
 
-            for (implementation_states_iter, specification_states_iter) in states {
-                let specification_states: Vec<State> = specification_states_iter.collect();
+            for states_iter in states {
+                for (implementation_state, specification_state) in states_iter {
+                    let mut explored = true;
 
-                for implementation_state in implementation_states_iter {
-                    for specification_state in specification_states.iter() {
+                    if !implementation_passed.contains(&implementation_state) {
+                        implementation_passed.insert(&implementation_state);
+                        explored = false;
+                    }
+
+                    if !specification_passed.contains(&specification_state) {
+                        specification_passed.insert(&specification_state);
+                        explored = false;
+                    }
+
+                    if !explored {
                         match RefinementStatePair::from_states(
-                            implementation_state.clone(),
-                            specification_state.clone(),
+                            implementation_state,
+                            specification_state,
                         ) {
-                            Ok(state) => {
-                                if !passed.contains(state.clone().into()) {
-                                    passed.insert(state.clone().into());
-                                    worklist.push_back(state);
-                                }
-                            }
+                            Ok(state) => worklist.push_back(state),
                             Err(_) => return false,
                         }
                     }
                 }
             }
-        }*/
+        }
 
         true
     }

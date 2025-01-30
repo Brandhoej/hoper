@@ -6,7 +6,7 @@ use petgraph::graph::NodeIndex;
 
 use super::{action::Action, edge::Edge, ioa::IOA, location::Location, ta::TA};
 
-#[derive(PartialEq, Eq, Clone, Hash)]
+#[derive(PartialEq, Eq, Clone, Hash, Debug)]
 pub enum LocationTree {
     Leaf(NodeIndex),
     Branch(Vec<LocationTree>),
@@ -47,56 +47,22 @@ impl Display for LocationTree {
 }
 
 #[derive(Clone)]
-pub enum Move {
-    To { edge: Edge, location: LocationTree },
-    Stay { location: LocationTree },
+pub struct Traversal {
+    edge: Edge,
+    location: LocationTree,
 }
 
-impl Move {
-    pub const fn to(edge: Edge, location: LocationTree) -> Self {
-        Self::To { edge, location }
+impl Traversal {
+    pub const fn new(edge: Edge, location: LocationTree) -> Self {
+        Self { edge, location }
     }
 
-    pub const fn stay(location: LocationTree) -> Self {
-        Self::Stay { location }
+    pub const fn edge(&self) -> &Edge {
+        &self.edge
     }
 
-    pub fn combination(moves: impl Iterator<Item = Self>) -> Self {
-        let (locations, edges) =
-            moves.fold((Vec::new(), Vec::new()), |(mut locs, mut edges), m| {
-                locs.push(m.location().clone());
-
-                if let Some(edge) = m.edge() {
-                    edges.push(edge.clone());
-                }
-
-                (locs, edges)
-            });
-
-        Self::to(
-            Edge::conjoin(edges).unwrap(),
-            LocationTree::new_branch(locations),
-        )
-    }
-
-    pub fn combinations(moves: impl Iterator<Item = Vec<Self>>) -> impl Iterator<Item = Self> {
-        moves
-            .multi_cartesian_product()
-            .map(|moves| Self::combination(moves.into_iter()))
-            .into_iter()
-    }
-
-    pub const fn location(&self) -> &LocationTree {
-        match self {
-            Move::To { location, .. } | Move::Stay { location } => location,
-        }
-    }
-
-    pub const fn edge(&self) -> Option<&Edge> {
-        match self {
-            Move::To { edge, .. } => Some(edge),
-            Move::Stay { .. } => None,
-        }
+    pub const fn destination(&self) -> &LocationTree {
+        &self.location
     }
 }
 
@@ -106,7 +72,11 @@ where
 {
     fn initial_location(&self) -> LocationTree;
     fn location(&self, tree: &LocationTree) -> Result<Location, ()>;
-    fn outgoing(&self, source: &LocationTree, action: Action) -> Result<Vec<Move>, ()>;
+    fn outgoing_traversals(
+        &self,
+        source: &LocationTree,
+        action: Action,
+    ) -> Result<Vec<Traversal>, ()>;
 }
 
 #[cfg(test)]

@@ -2,10 +2,12 @@ use std::collections::HashSet;
 
 use petgraph::{
     graph::{DiGraph, EdgeIndex, EdgeReference, NodeIndex},
-    visit::EdgeRef,
+    visit::{EdgeRef, NodeRef},
     Direction::{Incoming, Outgoing},
 };
 use symbol_table::Symbol;
+
+use crate::zones::constraint::Clock;
 
 use super::{
     action::Action,
@@ -14,7 +16,7 @@ use super::{
     ioa::IOA,
     location::Location,
     ta::TA,
-    tioa::{LocationTree, Move, TIOA},
+    tioa::{LocationTree, Traversal, TIOA},
 };
 
 /// A Timed Input/Output Automaton which describes real time behaviour using clocks over reals.
@@ -66,6 +68,10 @@ impl Automaton {
         self.graph.node_weight(index)
     }
 
+    pub fn location_tree(&self, index: NodeIndex) -> LocationTree {
+        LocationTree::new_leaf(index)
+    }
+
     pub fn edge(&self, index: EdgeIndex) -> Option<&Edge> {
         self.graph.edge_weight(index)
     }
@@ -78,11 +84,18 @@ impl Automaton {
         self.outputs.iter()
     }
 
-    pub fn moves<'a, T: Iterator<Item = EdgeReference<'a, Edge>> + 'a>(
+    pub fn traversals<'a, T: Iterator<Item = EdgeReference<'a, Edge>> + 'a>(
         &'a self,
         edges: T,
-    ) -> impl Iterator<Item = Move> + use<'a, T> {
-        edges.map(|edge| Move::to(edge.weight().clone(), LocationTree::new_leaf(edge.target())))
+    ) -> impl Iterator<Item = Traversal> + use<'a, T> {
+        edges.map(|edge| Traversal::new(edge.weight().clone(), self.location_tree(edge.target())))
+    }
+
+    pub fn edges<'a, T: Iterator<Item = EdgeReference<'a, Edge>> + 'a>(
+        &'a self,
+        edges: T,
+    ) -> impl Iterator<Item = &'a Edge> + use<'a, T> {
+        edges.map(|edge| edge.weight())
     }
 
     pub fn ingoing(&self, node: NodeIndex) -> impl Iterator<Item = EdgeReference<Edge>> {
@@ -167,13 +180,6 @@ impl Automaton {
         self.graph.node_count()
     }
 
-    /// By only looking at the upper bound of clock valuations described in the invariant
-    /// a zone is extrapolated from 0 to the max local bounds. This set of valuations is
-    /// then used to see what inputs are not enabled.
-    pub fn locally_disabled(&self, node: NodeIndex, input: Action) -> impl Iterator<Item = Edge> {
-        vec![].into_iter()
-    }
-
     /// Adds an edge to the underlying graph without ensuring that adding the edge breaks any
     /// of the rules of the Automaton. An example is non-determinism, where an existing edge
     /// can lead to a different state from the same state as the edge to be added. Ergo, this
@@ -192,6 +198,10 @@ impl TA for Automaton {
     fn clocks(&self) -> HashSet<Symbol> {
         self.clocks.clone()
     }
+
+    fn clock_count(&self) -> Clock {
+        self.clocks.len() as Clock
+    }
 }
 
 impl IOA for Automaton {
@@ -209,10 +219,14 @@ impl TIOA for Automaton {
         LocationTree::Leaf(self.initial)
     }
 
-    fn outgoing(&self, source: &LocationTree, action: Action) -> Result<Vec<Move>, ()> {
+    fn outgoing_traversals(
+        &self,
+        source: &LocationTree,
+        action: Action,
+    ) -> Result<Vec<Traversal>, ()> {
         if let LocationTree::Leaf(node) = source {
             Ok(self
-                .moves(self.filter_by_action(self.outgoing(*node), action))
+                .traversals(self.filter_by_action(self.outgoing(*node), action))
                 .collect())
         } else {
             Err(())

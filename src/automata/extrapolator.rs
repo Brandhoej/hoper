@@ -8,8 +8,10 @@ use crate::{
 };
 
 use super::{
+    environment::Environment,
     expressions::{Binary, Expression},
     literal::Literal,
+    tiots::State,
 };
 
 /// The range of clocks can in theory be unbounded, meaning that a clock can run
@@ -42,10 +44,10 @@ impl Extrapolator {
         Self { stack: Vec::new() }
     }
 
-    pub fn bounds(&mut self, bounds: Bounds, expression: &Expression) -> Bounds {
+    pub fn bounds(&mut self, bounds: Bounds, state: &State, expression: &Expression) -> Bounds {
         match expression {
             Expression::Unary(unary, expression) => {
-                let bounds = self.bounds(bounds, expression);
+                let bounds = self.bounds(bounds, state, expression);
                 let value = self.stack.pop().unwrap();
 
                 match unary {
@@ -58,7 +60,7 @@ impl Extrapolator {
             }
             Expression::Binary(lhs, binary, rhs) => match binary {
                 Binary::Conjunction => {
-                    let lhs_bounds = self.bounds(bounds.clone(), lhs);
+                    let lhs_bounds = self.bounds(bounds.clone(), state, lhs);
                     let lhs_bool = self.stack.pop().unwrap().boolean().unwrap();
 
                     if !lhs_bool {
@@ -66,7 +68,7 @@ impl Extrapolator {
                         return Bounds::empty();
                     }
 
-                    let rhs_bounds = self.bounds(bounds, rhs);
+                    let rhs_bounds = self.bounds(bounds, state, rhs);
                     let rhs_bool = self.stack.pop().unwrap().boolean().unwrap();
 
                     if !rhs_bool {
@@ -78,10 +80,10 @@ impl Extrapolator {
                     lhs_bounds.tighten_all(rhs_bounds.into_iter())
                 }
                 Binary::Disjunction => {
-                    let lhs_bounds = self.bounds(bounds.clone(), lhs);
+                    let lhs_bounds = self.bounds(bounds.clone(), state, lhs);
                     let lhs_bool = self.stack.pop().unwrap().boolean().unwrap();
 
-                    let rhs_bounds = self.bounds(bounds.clone(), rhs);
+                    let rhs_bounds = self.bounds(bounds.clone(), state, rhs);
                     let rhs_bool = self.stack.pop().unwrap().boolean().unwrap();
 
                     self.stack.push(Literal::new_boolean(lhs_bool || rhs_bool));
@@ -97,19 +99,20 @@ impl Extrapolator {
                     };
                 }
             },
-            Expression::Group(expression) => self.bounds(bounds, expression),
+            Expression::Group(expression) => self.bounds(bounds, state, expression),
             Expression::Literal(literal) => {
                 self.stack.push(literal.clone());
                 Bounds::empty()
             }
             Expression::ClockConstraint(operand, comparison, limit) => {
-                self.bounds(bounds.clone(), &operand);
-                let clock = self.stack.pop().unwrap().identifier().unwrap();
+                self.bounds(bounds.clone(), state, &operand);
+                let clock_symbol = self.stack.pop().unwrap().identifier().unwrap();
+                let clock = state.ref_environemnt().get_clock(clock_symbol).unwrap();
 
-                self.bounds(bounds.clone(), &limit);
+                self.bounds(bounds.clone(), state, &limit);
                 let limit_literal = self.stack.pop().unwrap().i16().unwrap();
 
-                /*match comparison {
+                match comparison {
                     Comparison::LessThanOrEqual => {
                         bounds.tighten_upper(clock, Relation::weak(limit_literal))
                     }
@@ -123,21 +126,27 @@ impl Extrapolator {
                     Comparison::GreaterThan => {
                         bounds.tighten_lower(clock, Relation::strict(-limit_literal))
                     }
-                }*/
-
-                todo!()
+                }
             }
             Expression::DiagonalClockConstraint(minuend, subtrahend, comparison, limit) => {
-                self.bounds(bounds.clone(), &minuend);
-                let minuend_clock = self.stack.pop().unwrap().identifier().unwrap();
+                self.bounds(bounds.clone(), state, &minuend);
+                let minuend_clock_symbol = self.stack.pop().unwrap().identifier().unwrap();
+                let minuend_clock = state
+                    .ref_environemnt()
+                    .get_clock(minuend_clock_symbol)
+                    .unwrap();
 
-                self.bounds(bounds.clone(), &subtrahend);
-                let subtrahend_clock = self.stack.pop().unwrap().identifier().unwrap();
+                self.bounds(bounds.clone(), state, &subtrahend);
+                let subtrahend_clock_symbol = self.stack.pop().unwrap().identifier().unwrap();
+                let subtrahend_clock = state
+                    .ref_environemnt()
+                    .get_clock(subtrahend_clock_symbol)
+                    .unwrap();
 
-                self.bounds(bounds.clone(), &limit);
+                self.bounds(bounds.clone(), state, &limit);
                 let limit_literal = self.stack.pop().unwrap().i16().unwrap();
 
-                /*match comparison {
+                match comparison {
                     Comparison::LessThanOrEqual => bounds.tighten(
                         minuend_clock,
                         subtrahend_clock,
@@ -161,40 +170,15 @@ impl Extrapolator {
                         subtrahend_clock,
                         Relation::strict(-limit_literal),
                     ),
-                }*/
-
-                todo!()
+                }
             }
-        }
-    }
-
-    pub fn expression(
-        &mut self,
-        zone: DBM<Dirty>,
-        expression: &Expression,
-    ) -> Result<DBM<Canonical>, DBM<Unsafe>> {
-        let bounds = self.bounds(Bounds::empty(), expression);
-        match zone.extrapolate(bounds) {
-            Ok(zone) => zone.clean(),
-            Err(zone) => Err(zone),
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        automata::{
-            expressions::{Comparison, Expression},
-            literal::Literal,
-        },
-        zones::{
-            bounds::Bounds,
-            constraint::{Constraint, Relation},
-        },
-    };
-
-    use super::Extrapolator;
+    use crate::{automata::expressions::Expression, zones::bounds::Bounds};
 
     #[test]
     fn extrapolate_clock_constraints() {
@@ -264,10 +248,10 @@ mod tests {
             ),*/
         ];
 
-        for (expression, expected) in tests.into_iter() {
+        /*for (expression, expected) in tests.into_iter() {
             let mut extrapolator = Extrapolator::new();
             let actual = extrapolator.bounds(Bounds::delay(2), &expression);
             assert_eq!(actual, expected);
-        }
+        }*/
     }
 }

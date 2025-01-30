@@ -1,7 +1,5 @@
 use std::fmt::{self, Display};
 
-use crate::zones::constraint::{Clock, Constraint, Limit, Relation};
-
 use super::literal::Literal;
 
 #[derive(Clone, Debug)]

@@ -34,9 +34,9 @@ mod tests {
 
         let mut graph = DiGraph::new();
         let waiting_node = graph.add_node(Location::with_name(waiting_symbol));
-        let fast_node = graph.add_node(Location::with_name(fast_symbol));
-        let slow_node = graph.add_node(Location::new(
-            slow_symbol,
+        let slow_node = graph.add_node(Location::with_name(slow_symbol));
+        let fast_node = graph.add_node(Location::new(
+            fast_symbol,
             // u <= 20
             Expression::new_clock_constraint(
                 Literal::new_identifier(clock).into(),
@@ -81,7 +81,7 @@ mod tests {
                     Comparison::LessThanOrEqual,
                     Literal::new_i16(2).into(),
                 ),
-                Statement::FreeClock(clock),
+                Statement::Reset(clock, 0),
             ),
         );
         // grant?
@@ -97,7 +97,7 @@ mod tests {
             Edge::new_output(
                 news_action,
                 Literal::new_true().into(),
-                Statement::FreeClock(clock),
+                Statement::Reset(clock, 0),
             ),
         );
 

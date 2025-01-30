@@ -31,10 +31,11 @@ impl InputEnabled for Automaton {
             Itertools::cartesian_product(self.node_iter(), inputs.into_iter())
                 .par_bridge()
                 .all(|(node, input)| {
-                    self.locally_disabled(node, input)
-                        .peekable()
-                        .peek()
-                        .is_some()
+                    /*self.locally_disabled(node, input)
+                    .peekable()
+                    .peek()
+                    .is_some()*/
+                    todo!()
                 });
 
         if has_disabled_inputs {

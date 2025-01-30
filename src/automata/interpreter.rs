@@ -1,6 +1,6 @@
 use crate::zones::dbm::{Canonical, DBM};
 
-use super::{expressions::Expression, literal::Literal, statements::Statement};
+use super::{expressions::Expression, literal::Literal, statements::Statement, tiots::State};
 
 pub struct Interpreter {
     stack: Vec<Literal>,
@@ -11,29 +11,29 @@ impl Interpreter {
         Self { stack: Vec::new() }
     }
 
-    pub fn expression(&mut self, zone: &DBM<Canonical>, expression: &Expression) {}
+    pub fn expression(&mut self, state: &State, expression: &Expression) {}
 
-    pub fn statement(&mut self, mut zone: DBM<Canonical>, statement: &Statement) -> DBM<Canonical> {
+    pub fn statement(&mut self, mut state: State, statement: &Statement) -> State {
         match statement {
             Statement::Sequence(statements) => {
                 for statement in statements.into_iter() {
-                    zone = self.statement(zone, statement)
+                    state = self.statement(state, statement)
                 }
-                zone
+                state
             }
             Statement::Branch(branches) => {
                 for branch in branches.into_iter() {
-                    zone = self.statement(zone, branch)
+                    state = self.statement(state, branch)
                 }
-                zone
+                state
             }
             Statement::Expression(expression) => {
-                self.expression(&zone, expression);
-                zone
+                todo!()
             }
-            Statement::FreeClock(clock) => {
-                // zone.free(*clock);
-                zone
+            Statement::Reset(clock, limit) => {
+                let clock = state.ref_environemnt().get_clock(*clock).unwrap();
+                state.mut_zone().reset(clock, *limit);
+                state
             }
         }
     }

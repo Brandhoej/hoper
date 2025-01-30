@@ -2,12 +2,15 @@ use std::collections::HashSet;
 
 use symbol_table::Symbol;
 
+use crate::zones::constraint::Clock;
+
 use super::{
     action::Action,
+    edge::Edge,
     ioa::IOA,
     location::Location,
     ta::TA,
-    tioa::{LocationTree, Move, TIOA},
+    tioa::{LocationTree, Traversal, TIOA},
 };
 
 /// A specification is an automaton which is input-enabled.
@@ -33,6 +36,10 @@ impl TA for Specification {
     fn clocks(&self) -> HashSet<Symbol> {
         self.0.clocks()
     }
+
+    fn clock_count(&self) -> Clock {
+        self.0.clock_count()
+    }
 }
 
 impl IOA for Specification {
@@ -50,8 +57,12 @@ impl TIOA for Specification {
         self.0.initial_location()
     }
 
-    fn outgoing(&self, source: &LocationTree, action: Action) -> Result<Vec<Move>, ()> {
-        self.0.outgoing(source, action)
+    fn outgoing_traversals(
+        &self,
+        source: &LocationTree,
+        action: Action,
+    ) -> Result<Vec<Traversal>, ()> {
+        self.0.outgoing_traversals(source, action)
     }
 
     fn location(&self, tree: &LocationTree) -> Result<Location, ()> {

@@ -6,7 +6,7 @@ use crate::zones::constraint::Clock;
 
 use super::tioa::TIOA;
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Environment {
     // Since inserts only happen at initialisation.
     // Then, maybe, the HashMap is not an appropriate datastructure
@@ -15,7 +15,7 @@ pub struct Environment {
 }
 
 impl Environment {
-    pub fn empty() -> Self {
+    pub fn new() -> Self {
         Self {
             clocks: HashMap::new(),
         }
@@ -39,7 +39,7 @@ impl Environment {
 
 impl<T: TIOA + ?Sized> From<&T> for Environment {
     fn from(value: &T) -> Self {
-        let mut environment = Self::empty();
+        let mut environment = Self::new();
         for clock in value.clocks() {
             environment.insert_clock(clock);
         }

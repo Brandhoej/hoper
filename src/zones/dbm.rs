@@ -2,8 +2,6 @@ use std::ops::{Index, IndexMut};
 
 use bitset::BitSet;
 
-use crate::automata::conversion::Conversion;
-
 use super::{
     bounds::Bounds,
     constraint::{Clock, Limit, Relation, Strictness, INFINITY, REFERENCE, ZERO},
@@ -11,7 +9,7 @@ use super::{
 
 pub trait DBMState: Sized {}
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct DBM<State: DBMState> {
     /// The number of clocks inside the DBM.
     clocks: Clock,
@@ -117,9 +115,11 @@ impl<State: DBMState> DBM<State> {
         self.relations[index] = relation
     }
 
-    pub fn delay(&mut self, limit: Limit) {
-        for clock in REFERENCE+1..self.dimensions() {
-            self.set_upper(clock, self.upper(clock).extend(limit));
+    pub fn delay(&mut self, delay: Relation) {
+        for clock in REFERENCE + 1..self.dimensions() {
+            if !self.upper(clock).is_infinity() {
+                self.set_upper(clock, self.upper(clock) + delay);
+            }
         }
     }
 
@@ -164,6 +164,7 @@ impl<State: DBMState> DBM<State> {
     /// Removes all constraints on a given clock, i.e., the clock may take any positive value.
     /// This is expressed as {u[x=d] | u ∈ D, d ∈ ℝ+}.
     pub fn free(&mut self, clock: Clock) {
+        // FIXME: Allows freeing the reference clock.
         for i in REFERENCE..self.dimensions() {
             if i != clock {
                 self.set_diagonal(clock, i, INFINITY);
@@ -201,6 +202,7 @@ impl<State: DBMState> DBM<State> {
 
     /// Compound addition assignment of the clock "clock := clock + limit".
     pub fn shift(&mut self, clock: Clock, limit: Limit) {
+        // FIXME: I dont think this handles DBMs which can delay indefinitly correctly.
         let positive = Relation::new(limit, Strictness::Weak);
         let negative = Relation::new(-limit, Strictness::Weak);
         for i in REFERENCE..self.dimensions() {
@@ -239,6 +241,12 @@ impl<State: DBMState> DBM<State> {
             }
         }
         false
+    }
+
+    /// Returns true if the DBM is in cannonical form by checking if closing requires changes.
+    #[inline]
+    pub fn is_closed(&self) -> bool {
+        todo!()
     }
 
     pub fn fmt_conjunctions(&self, labels: &Vec<&str>) -> String {
@@ -322,7 +330,7 @@ impl<T: DBMState> Index<(Clock, Clock)> for DBM<T> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Canonical {}
 impl DBMState for Canonical {}
 
@@ -352,6 +360,16 @@ impl DBM<Canonical> {
         }
 
         dbm
+    }
+
+    pub fn convex_union(&mut self, other: &Self) {
+        for i in REFERENCE..self.dimensions() {
+            for j in REFERENCE..other.dimensions() {
+                if self[(i, j)] < other[(i, j)] {
+                    self.set(i, j, other[(i, j)]);
+                }
+            }
+        }
     }
 
     /// Returns a tuple (subset, superset bool) of:
@@ -420,6 +438,13 @@ impl DBM<Canonical> {
 
     pub fn equals(&self, clock: Clock, limit: Limit) -> bool {
         self.upper(clock).limit() <= limit && self.lower(clock).limit() <= -limit
+    }
+
+    pub fn delays(&self) -> Relation {
+        (REFERENCE + 1..self.dimensions())
+            .map(|clock| self.upper(clock) + self.lower(clock))
+            .min()
+            .unwrap()
     }
 
     /// Returns a vector with the length corresponding to each clock in the DBM.
@@ -936,7 +961,7 @@ mod tests {
 
     use crate::zones::{
         bounds::Bounds,
-        constraint::{Limit, Relation, RelationsSample, Strictness, UniformRelations},
+        constraint::{Relation, RelationsSample, Strictness, UniformRelations, INFINITY, ZERO},
     };
 
     use super::{Canonical, Dirty, DBM};
@@ -1173,7 +1198,7 @@ mod tests {
     #[test]
     fn extrapolation_universe_with_delayed_bounds() {
         let dbm = DBM::universe(2);
-        let bounds = Bounds::delay(2);
+        let bounds = Bounds::universe(2);
         let extrapolation = dbm.extrapolate(bounds);
 
         assert!(extrapolation.is_ok());
@@ -1183,7 +1208,7 @@ mod tests {
     #[test]
     fn extrapolate_universe_tighter_bounds() {
         let dbm = DBM::universe(2);
-        let bounds = Bounds::delay(2)
+        let bounds = Bounds::universe(2)
             .tighten_lower(1, Relation::weak(-10))
             .tighten_lower(2, Relation::weak(-10))
             .tighten_upper(1, Relation::strict(20))
@@ -1201,11 +1226,50 @@ mod tests {
     }
 
     #[test]
-    fn delay() {
-        let mut zone = dbm1();
-        zone.delay(10);
-        let conjunctions = zone.fmt_conjunctions(&vec!["x", "y"]);
+    fn delays_from_zero() {
+        let mut dbm = DBM::zero(2);
+        assert_eq!(dbm.delays(), ZERO);
 
-        assert_eq!(conjunctions, "");
+        dbm.delay(Relation::weak(10));
+        assert_eq!(dbm.delays(), Relation::weak(10));
+
+        dbm.delay(Relation::weak(-5));
+        assert_eq!(dbm.delays(), Relation::weak(5));
+
+        dbm.delay(Relation::strict(-1));
+        assert_eq!(dbm.delays(), Relation::strict(4));
+    }
+
+    #[test]
+    fn delays_from_universe() {
+        let mut dbm = DBM::universe(2);
+        assert_eq!(dbm.delays(), INFINITY);
+
+        dbm.delay(Relation::strict(10));
+        assert_eq!(dbm.delays(), INFINITY);
+
+        dbm.delay(Relation::strict(-5));
+        assert_eq!(dbm.delays(), INFINITY);
+    }
+
+    #[test]
+    fn delays_dbm1() {
+        let mut dbm = dbm1();
+        assert_eq!(dbm.delays(), Relation::strict(1));
+
+        dbm.delay(Relation::strict(4));
+        assert_eq!(dbm.delays(), Relation::strict(5));
+
+        dbm.up();
+        assert_eq!(dbm.delays(), INFINITY);
+
+        dbm.down();
+        assert_eq!(dbm.delays(), INFINITY);
+
+        dbm.free(1);
+        assert_eq!(dbm.delays(), INFINITY);
+
+        dbm.reset(1, 10);
+        assert_eq!(dbm.delays(), Relation::weak(0));
     }
 }

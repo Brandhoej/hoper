@@ -1,6 +1,7 @@
 use crate::{
     automata::extrapolator::Extrapolator,
     zones::{
+        bounds::Bounds,
         constraint::Clock,
         dbm::{Canonical, DBM},
     },
@@ -8,14 +9,15 @@ use crate::{
 
 use super::{
     action::Action,
+    edge::Edge,
     environment::Environment,
     interpreter::Interpreter,
     ioa::IOA,
     ta::TA,
-    tioa::{LocationTree, Move, TIOA},
+    tioa::{LocationTree, Traversal, TIOA},
 };
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct State {
     location: LocationTree,
     zone: DBM<Canonical>,
@@ -39,8 +41,30 @@ impl State {
         &self.location
     }
 
-    pub const fn zone(&self) -> &DBM<Canonical> {
+    pub fn set_location(&mut self, location: LocationTree) {
+        self.location = location
+    }
+
+    pub const fn ref_zone(&self) -> &DBM<Canonical> {
         &self.zone
+    }
+
+    pub const fn mut_zone(&mut self) -> &mut DBM<Canonical> {
+        &mut self.zone
+    }
+
+    pub fn extrapolate(mut self, bounds: Bounds) -> Result<Self, ()> {
+        match self.zone.extrapolate(bounds) {
+            Ok(zone) => {
+                self.zone = zone;
+                Ok(self)
+            }
+            Err(_) => Err(()),
+        }
+    }
+
+    pub const fn ref_environemnt(&self) -> &Environment {
+        &self.environment
     }
 
     pub fn decompose(self) -> (LocationTree, DBM<Canonical>, Environment) {
@@ -50,33 +74,33 @@ impl State {
 
 #[derive(Clone)]
 pub enum Transition {
-    Synchronisation { action: Action, destination: State },
-    Silent { destination: State },
+    Discrete { action: Action, destination: State },
+    Delay { destination: State },
 }
 
 impl Transition {
-    pub const fn new_synchronisation(action: Action, destination: State) -> Self {
-        Self::Synchronisation {
+    pub const fn new_discrete(action: Action, destination: State) -> Self {
+        Self::Discrete {
             action,
             destination,
         }
     }
 
-    pub const fn new_silent(destination: State) -> Self {
-        Self::Silent { destination }
+    pub const fn new_delay(destination: State) -> Self {
+        Self::Delay { destination }
     }
 
     pub fn action(&self) -> Option<Action> {
         match self {
-            Transition::Synchronisation { action, .. } => Some(*action),
-            Transition::Silent { .. } => None,
+            Transition::Discrete { action, .. } => Some(*action),
+            Transition::Delay { .. } => None,
         }
     }
 
     pub fn destination(&self) -> &State {
         match self {
-            Transition::Synchronisation { destination, .. } => destination,
-            Transition::Silent { destination } => destination,
+            Transition::Discrete { destination, .. } => destination,
+            Transition::Delay { destination } => destination,
         }
     }
 }
@@ -85,103 +109,154 @@ pub trait TIOTS
 where
     Self: TA + IOA,
 {
-    fn initial_state(&self) -> State;
-    fn transitions(
-        &self,
-        source: State,
-        moves: impl Iterator<Item = Move>,
-    ) -> impl Iterator<Item = Transition>;
-    fn traverse_from(
-        &self,
-        source: State,
-        action: Action,
-    ) -> Result<impl Iterator<Item = Transition>, ()>;
-    fn states_from(
-        &self,
-        source: State,
-        action: Action,
-    ) -> Result<impl Iterator<Item = State>, ()> {
-        match self.traverse_from(source, action) {
-            Ok(transitions) => {
-                Ok(transitions.map(|transition| transition.destination().to_owned()))
-            }
-            Err(_) => Err(()),
-        }
-    }
+    fn initial_state(&self) -> Result<State, ()>;
+    fn delay(&self, state: State) -> Result<State, ()>;
+    fn discrete(&self, state: State, traversal: &Traversal) -> Result<State, ()>;
+    fn enabled_edges(&self, state: &State, action: &Action) -> impl Iterator<Item = Edge>;
 }
 
 impl<T: ?Sized + TIOA> TIOTS for T {
-    fn initial_state(&self) -> State {
+    fn initial_state(&self) -> Result<State, ()> {
         let location = self.initial_location();
-        let invariant = self.location(&self.initial_location()).unwrap().invariant();
-        let zone = DBM::universe(self.clocks().len() as Clock);
-        match Extrapolator::new().expression(zone.dirty(), &invariant) {
-            Ok(zone) => State::new(location, zone, self.into()),
-            Err(_) => panic!("a TIOTS should have an initial state"),
+        let zone = DBM::zero(self.clock_count());
+        let mut environemnt = Environment::new();
+        for clock in self.clocks() {
+            environemnt.insert_clock(clock);
         }
+        let state = State::new(location, zone, environemnt);
+        self.delay(state)
     }
 
-    fn transitions(
-        &self,
-        source: State,
-        moves: impl Iterator<Item = Move>,
-    ) -> impl Iterator<Item = Transition> {
-        let is_empty = source.zone.is_empty();
+    fn delay(&self, state: State) -> Result<State, ()> {
         let mut extrapolator = Extrapolator::new();
-        let mut interpreter = Interpreter::new();
-
-        moves
-            .filter_map(move |m| {
-                if is_empty {
-                    return None;
-                }
-
-                let mut zone = source.zone.clone();
-
-                // If there is a edge we have to first check the guard and then traverse it.
-                if let Some(edge) = m.edge() {
-                    // diagonal constraints, upper/lower bounds, and such.
-                    match extrapolator.expression(zone.dirty(), edge.guard()) {
-                        Ok(extrapolation) => zone = extrapolation,
-                        Err(_) => return None,
-                    }
-
-                    // Resets, copies, and such.
-                    zone = interpreter.statement(zone, edge.update());
-                }
-
-                // We have traversed the edge (if any) now we relax which is assumed indefinite.
-                // However, this will later be restricted by the location's invariant.
-                zone.up();
-
-                // At the end of the move we have to check the invariant it it is satified.
-                let location = self.location(m.location()).unwrap();
-                match extrapolator.expression(zone.dirty(), &location.invariant()) {
-                    Ok(extrapolation) => zone = extrapolation,
-                    Err(_) => return None,
-                }
-
-                let destination =
-                    State::new(m.location().clone(), zone, source.environment.clone());
-
-                Some(match m {
-                    Move::To { edge, .. } => {
-                        Transition::new_synchronisation(*edge.action(), destination)
-                    }
-                    Move::Stay { .. } => Transition::new_silent(destination),
-                })
-            })
-            .into_iter()
+        let location = self.location(state.location()).unwrap();
+        let bounds = extrapolator.bounds(
+            Bounds::universe(self.clocks().len() as Clock),
+            &state,
+            &location.invariant(),
+        );
+        state.extrapolate(bounds)
     }
 
-    fn traverse_from(
-        &self,
-        source: State,
-        action: Action,
-    ) -> Result<impl Iterator<Item = Transition>, ()> {
-        match TIOA::outgoing(self, source.location(), action) {
-            Ok(transitions) => Ok(self.transitions(source.clone(), transitions.into_iter())),
-            Err(_) => Err(()),
+    fn discrete(&self, mut state: State, traversal: &Traversal) -> Result<State, ()> {
+        // Extrapolate based on the guards. If not empty then interpret the update and move.
+        let mut extrapolator = Extrapolator::new();
+        let bounds = extrapolator.bounds(Bounds::empty(), &state, traversal.edge().guard());
+        match state.extrapolate(bounds) {
+            Ok(extrapolation) => state = extrapolation,
+            Err(_) => return Err(()),
         }
+
+        let mut interpreter = Interpreter::new();
+        state = interpreter.statement(state, traversal.edge().update());
+
+        state.set_location(traversal.destination().clone());
+
+        Ok(state)
+    }
+
+    fn enabled_edges(&self, state: &State, action: &Action) -> impl Iterator<Item = Edge> {
+        todo!();
+        vec![].into_iter()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use petgraph::graph::DiGraph;
+    use symbol_table::SymbolTable;
+
+    use crate::automata::{
+        action::Action,
+        automaton::Automaton,
+        edge::Edge,
+        expressions::{Comparison, Expression},
+        literal::Literal,
+        location::Location,
+        statements::Statement,
+        tioa::{LocationTree, Traversal, TIOA},
+        tiots::TIOTS,
+    };
+
+    #[test]
+    fn test_automaton_1() {
+        let symbols = SymbolTable::new();
+        let loc_0 = symbols.intern("0");
+        let loc_1 = symbols.intern("1");
+        let moved_symbol = symbols.intern("moved");
+        let clock = symbols.intern("clock");
+
+        let mut graph = DiGraph::new();
+        let node_0 = graph.add_node(Location::new(
+            loc_0,
+            Expression::new_clock_constraint(
+                Literal::new_identifier(clock).into(),
+                Comparison::LessThanOrEqual,
+                Literal::new_i16(5).into(),
+            ),
+        ));
+        let node_1 = graph.add_node(Location::new(
+            loc_1,
+            Expression::new_clock_constraint(
+                Literal::new_identifier(clock).into(),
+                Comparison::LessThan,
+                Literal::new_i16(10).into(),
+            ),
+        ));
+
+        let moved_action = Action::new(moved_symbol);
+
+        graph.add_edge(
+            node_0,
+            node_1,
+            Edge::new_output(
+                moved_action,
+                Expression::new_clock_constraint(
+                    Literal::new_identifier(clock).into(),
+                    Comparison::GreaterThan,
+                    Literal::new_i16(2).into(),
+                ),
+                Statement::empty(),
+            ),
+        );
+
+        let automaton =
+            Automaton::new(node_0, graph, HashSet::from_iter(vec![clock].into_iter())).unwrap();
+
+        assert_eq!(1, automaton.out_degree(node_0));
+        assert_eq!(0, automaton.in_degree(node_0));
+        assert_eq!(0, automaton.out_degree(node_1));
+        assert_eq!(1, automaton.in_degree(node_1));
+
+        let traversals_0: Vec<Traversal> = automaton
+            .outgoing_traversals(&LocationTree::Leaf(node_0), moved_action)
+            .unwrap();
+        assert_eq!(1, traversals_0.len());
+
+        let traversals_1: Vec<Traversal> = automaton
+            .outgoing_traversals(&LocationTree::Leaf(node_1), moved_action)
+            .unwrap();
+        assert_eq!(0, traversals_1.len());
+
+        let initial_state = automaton.initial_state().unwrap();
+        assert_eq!(
+            "-x ≤ 0 ∧ x ≤ 5",
+            initial_state.ref_zone().fmt_conjunctions(&vec!["x"])
+        );
+
+        let edge_01 = automaton.outgoing(node_0).collect::<Vec<_>>()[0].weight();
+        let mut following = automaton
+            .discrete(
+                initial_state,
+                &Traversal::new(edge_01.clone(), automaton.location_tree(node_1)),
+            )
+            .unwrap();
+        following = automaton.delay(following).unwrap();
+        assert_eq!(
+            "-x < -2 ∧ x < 10",
+            following.ref_zone().fmt_conjunctions(&vec!["x"])
+        );
     }
 }

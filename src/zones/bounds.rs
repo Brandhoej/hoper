@@ -23,7 +23,7 @@ impl Bounds {
         }
     }
 
-    pub fn delay(clocks: Clock) -> Self {
+    pub fn universe(clocks: Clock) -> Self {
         let mut bounds = Self::with_capacity(clocks as usize);
         for clock in 1..=clocks {
             bounds.relations.insert((clock, REFERENCE), INFINITY);
@@ -193,7 +193,7 @@ mod tests {
 
     #[test]
     fn bounds_delay() {
-        let bounds = Bounds::delay(2);
+        let bounds = Bounds::universe(2);
         assert!(bounds.clocks().is_some());
         assert_eq!(bounds.clocks().unwrap(), 2);
         assert_eq!(bounds.relations.len(), 2);
@@ -205,7 +205,7 @@ mod tests {
 
     #[test]
     fn bounds_tighten_delay() {
-        let bounds = Bounds::delay(2).tighten_upper(1, Relation::weak(10));
+        let bounds = Bounds::universe(2).tighten_upper(1, Relation::weak(10));
         assert_eq!(bounds.upper(1).unwrap(), Relation::weak(10));
         assert_eq!(bounds.upper(2).unwrap(), INFINITY);
     }

@@ -2,15 +2,19 @@ use std::collections::HashSet;
 
 use symbol_table::Symbol;
 
-use crate::sets::{are_disjoint, intersection, skip_nth, subtract, union};
+use crate::{
+    sets::{are_disjoint, intersection, skip_nth, subtract, union},
+    zones::constraint::Clock,
+};
 
 use super::{
     action::Action,
+    edge::Edge,
     ioa::IOA,
     location::Location,
     specification::Specification,
     ta::TA,
-    tioa::{LocationTree, Move, TIOA},
+    tioa::{LocationTree, Traversal, TIOA},
 };
 
 /// Represents the parallel composition of two timed input-output automata (TIOAs) A¹ and A².
@@ -126,6 +130,10 @@ impl TA for Composition {
     fn clocks(&self) -> HashSet<Symbol> {
         self.clocks.clone()
     }
+
+    fn clock_count(&self) -> Clock {
+        self.clocks.len() as Clock
+    }
 }
 
 impl IOA for Composition {
@@ -148,8 +156,13 @@ impl TIOA for Composition {
         )
     }
 
-    fn outgoing(&self, source: &LocationTree, action: Action) -> Result<Vec<Move>, ()> {
-        if !self.actions().contains(&action) {
+    fn outgoing_traversals(
+        &self,
+        source: &LocationTree,
+        action: Action,
+    ) -> Result<Vec<Traversal>, ()> {
+        todo!()
+        /*if !self.actions().contains(&action) {
             return Err(());
         }
 
@@ -161,7 +174,7 @@ impl TIOA for Composition {
                     .tiotas
                     .iter()
                     .enumerate()
-                    .map(|(i, tioas)| tioas.outgoing(&sources[i], action).unwrap());
+                    .map(|(i, tioas)| tioas.outgoing_moves(&sources[i], action).unwrap());
                 return Ok(Move::combinations(moves).collect());
             }
 
@@ -175,15 +188,15 @@ impl TIOA for Composition {
                 // Otherwise, we stay put at the same location as we came from.
                 if !found_unique && self.unique_actions[i].contains(&action) {
                     found_unique = true;
-                    tioas.outgoing(&sources[i], action).unwrap()
+                    tioas.outgoing_moves(&sources[i], action).unwrap()
                 } else {
-                    vec![Move::stay(sources[i].clone())]
+                    vec![Move::new_delay(sources[i].clone())]
                 }
             });
             return Ok(Move::combinations(moves).collect());
         }
 
-        Err(())
+        Err(())*/
     }
 
     fn location(&self, tree: &LocationTree) -> Result<Location, ()> {
