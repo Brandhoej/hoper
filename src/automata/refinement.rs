@@ -3,12 +3,11 @@ use std::{
     iter,
 };
 
-use itertools::Itertools;
-
 use crate::automata::tiots::TIOTS;
 
 use super::{
-    action::Action, ioa::IOA, specification::Specification, state_set::StateSet, tiots::State,
+    action::Action, edge::Edge, ioa::IOA, specification::Specification, state_set::StateSet,
+    tiots::State,
 };
 
 #[derive(Clone)]
@@ -30,18 +29,19 @@ impl RefinementStatePair {
         // Whenever s -d->ᔆ s' for some s' ∈ Qᔆ and d ∈ ℝ≥0, then t -d->ᵀ t' and (s', t') ∈ R for some t' ∈ Qᵀ.
 
         // The specification cannot match the implementation's delay.
-        let specification_delay = specification.ref_zone().delays();
-        let implementation_delay = implementation.ref_zone().delays();
+        let specification_delay = specification.ref_zone().duration();
+        let implementation_delay = implementation.ref_zone().duration();
         if specification_delay < implementation_delay {
             return Err(());
         }
 
         // The specification delays more than the implementation. But it should only at the maximum match the delay.
-        if specification_delay > implementation_delay {
+        todo!();
+        /*if specification_delay > implementation_delay {
             specification
                 .mut_zone()
                 .delay(implementation_delay - specification_delay);
-        }
+        }*/
 
         Ok(Self::new(implementation, specification))
     }
@@ -71,8 +71,6 @@ impl Refinement {
         implementation: Box<Specification>,
         specification: Box<Specification>,
     ) -> Result<Self, ()> {
-        // FIXME: Only consider
-
         // Actᔆᵢ ∩ Actᵀₒ = ∅
         if !implementation
             .inputs()
@@ -176,7 +174,8 @@ impl Refinement {
         };
 
         while let Some(pair) = worklist.pop_front() {
-            let mut states: Vec<Box<dyn Iterator<Item = (State, State)>>> = Vec::new();
+            let mut enabled_edges: Vec<Box<dyn Iterator<Item = (Vec<Edge>, Vec<Edge>)>>> =
+                Vec::new();
 
             // Rule 1 (Common inputs): Both the specification and implementaion can react on the input.
             // Whenever t -i?->ᵀ t' for some t' ∈ Qᵀ and i? ∈ Actᵀᵢ ∩ Actᔆᵢ , then s -i?->ᔆ s' and (s', t') ∈ R for some s' ∈ Qᔆ
@@ -186,21 +185,15 @@ impl Refinement {
                     .enabled_edges(&pair.specification(), input)
                     .peekable();
 
-                // Only when the specification can react to the common input should
-                // the implementation also be able to react to the input.
-                if specification_edges.peek().is_none() {
-                    continue;
-                }
-
                 let mut implementation_states = self
                     .implementation
                     .enabled_edges(&pair.implementation(), input)
                     .peekable();
 
-                // The implementation could not react to the input.
-                if implementation_states.peek().is_none() {
-                    return false;
-                }
+                // I believe that since both are specifications then thet must both be input-enabled.
+                // Because of this of this, they would all in all states be able to react to all inputs.
+                assert!(specification_edges.peek().is_some());
+                assert!(implementation_states.peek().is_some());
 
                 todo!()
                 /*states.push(Box::new(Itertools::cartesian_product(
@@ -212,15 +205,16 @@ impl Refinement {
             // Rule 2 (Unique specification inputs): Only the specification reacts to the input.
             // Whenever t -i?->ᵀ t' for some t' ∈ Qᵀ and i? ∈ Actᵀᵢ \ Actᔆᵢ, then (s, t') ∈ R.
             for input in self.unique_specification_inputs.iter() {
-                let mut specification_states = self
+                let mut specification_edges = self
                     .specification
                     .enabled_edges(pair.specification(), input)
                     .peekable();
 
-                if specification_states.peek().is_none() {
-                    continue;
-                }
+                // I believe that since both are specifications then thet must both be input-enabled.
+                // Because of this of this, they would all in all states be able to react to all inputs.
+                assert!(specification_edges.peek().is_some());
 
+                // I belive that in this cases cartesian product is enough.
                 todo!()
                 /*states.push(Box::new(Itertools::cartesian_product(
                     iter::once(pair.implementation()),
@@ -272,6 +266,7 @@ impl Refinement {
                     continue;
                 }
 
+                // I belive that in this cases cartesian product is enough.
                 todo!()
                 /*states.push(Box::new(Itertools::cartesian_product(
                     implementation_states,
@@ -279,7 +274,7 @@ impl Refinement {
                 )));*/
             }
 
-            for states_iter in states {
+            /*for states_iter in states {
                 for (implementation_state, specification_state) in states_iter {
                     let mut explored = true;
 
@@ -303,9 +298,37 @@ impl Refinement {
                         }
                     }
                 }
-            }
+            }*/
         }
 
         true
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        automata::tiots::State,
+        zones::{bounds::Bounds, constraint::Relation},
+    };
+
+    fn extrapolation<T: Iterator<Item = Bounds>>(
+        state: &State,
+        bounds: T,
+    ) -> impl Iterator<Item = (Relation, Relation, State)> + use<'_, T> {
+        let original_lower_relations = state.ref_zone().lower_relations();
+        bounds.filter_map(move |bounds| match state.clone().extrapolate(bounds) {
+            Ok(extrapolation) => {
+                let delay = extrapolation
+                    .ref_zone()
+                    .lower_difference(&original_lower_relations);
+                let duration = extrapolation.ref_zone().duration();
+                Some((delay, duration, extrapolation))
+            }
+            Err(_) => None,
+        })
+    }
+
+    #[test]
+    fn example() {}
 }

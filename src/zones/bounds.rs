@@ -11,7 +11,7 @@ pub struct Bounds {
 }
 
 impl Bounds {
-    pub fn empty() -> Self {
+    pub fn new() -> Self {
         Self {
             relations: HashMap::new(),
         }
@@ -167,7 +167,7 @@ impl IntoIterator for Bounds {
 
 impl From<Vec<Constraint>> for Bounds {
     fn from(constraints: Vec<Constraint>) -> Self {
-        let mut bounds = Bounds::empty();
+        let mut bounds = Bounds::new();
         for constraint in constraints.into_iter() {
             bounds = bounds.set(
                 constraint.minuend(),
@@ -187,7 +187,7 @@ mod tests {
 
     #[test]
     fn bounds_empty() {
-        let bounds = Bounds::empty();
+        let bounds = Bounds::new();
         assert!(bounds.is_empty());
     }
 
@@ -212,7 +212,7 @@ mod tests {
 
     #[test]
     fn bounds_expand() {
-        let bounds = Bounds::empty()
+        let bounds = Bounds::new()
             .set_lower(1, Relation::weak(-10))
             .set_upper(1, Relation::weak(20))
             .loosen_lower(1, Relation::weak(-5))
@@ -223,7 +223,7 @@ mod tests {
 
     #[test]
     fn bounds_shrink() {
-        let bounds = Bounds::empty()
+        let bounds = Bounds::new()
             .set_lower(1, Relation::weak(-5))
             .set_upper(1, Relation::weak(25))
             .tighten_lower(1, Relation::weak(-10))

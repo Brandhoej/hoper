@@ -192,9 +192,9 @@ impl Federation {
     }
 
     #[inline]
-    pub fn shift(self, clock: Clock, limit: Limit) -> Self {
+    pub fn shift(self, clock: Clock, relation: Relation) -> Self {
         self.map_mut(|mut dbm| {
-            dbm.shift(clock, limit);
+            dbm.shift(clock, relation);
             dbm
         })
     }

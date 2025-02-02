@@ -141,7 +141,7 @@ impl<T: ?Sized + TIOA> TIOTS for T {
     fn discrete(&self, mut state: State, traversal: &Traversal) -> Result<State, ()> {
         // Extrapolate based on the guards. If not empty then interpret the update and move.
         let mut extrapolator = Extrapolator::new();
-        let bounds = extrapolator.bounds(Bounds::empty(), &state, traversal.edge().guard());
+        let bounds = extrapolator.bounds(Bounds::new(), &state, traversal.edge().guard());
         match state.extrapolate(bounds) {
             Ok(extrapolation) => state = extrapolation,
             Err(_) => return Err(()),

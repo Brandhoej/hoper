@@ -1,7 +1,7 @@
 use std::{
     cmp::Ordering,
     fmt,
-    ops::{Add, AddAssign, Sub, SubAssign},
+    ops::{Add, AddAssign, Neg, Sub, SubAssign},
     u16, usize,
 };
 
@@ -21,7 +21,7 @@ pub type Clock = u16;
 pub const REFERENCE: Clock = 0;
 
 /// Describes the strictness (<, <=) of the constraint between two clocks in the DBM.
-#[derive(PartialEq, Debug, Clone, Copy)]
+#[derive(PartialEq, Debug, Clone, Copy, Eq, Ord)]
 pub enum Strictness {
     /// <
     Strict,
@@ -235,6 +235,12 @@ impl Relation {
 
     /// Negates the relation and returns self.
     pub const fn negation(&self) -> Self {
+        if self.equals(&ZERO) {
+            return ZERO;
+        }
+        if self.equals(&INFINITY) {
+            return INFINITY;
+        }
         Self::new(-self.limit(), self.strictness().opposite())
     }
 
@@ -261,6 +267,14 @@ impl Relation {
     ///
     /// OBS: Addition can overflow!
     pub const fn addition(&self, other: &Self) -> Self {
+        if other.is_zero() {
+            return *self;
+        }
+
+        if self.is_zero() {
+            return *other;
+        }
+
         if self.is_infinity() || other.is_infinity() {
             return INFINITY;
         }
@@ -270,8 +284,15 @@ impl Relation {
         Self((self.0 + other.0) - ((self.0 | other.0) & 1))
     }
 
+    pub const fn equals(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+
     /// subtract other from self by "self + (-other)".
     pub const fn subtraction(&self, other: &Self) -> Self {
+        if self.equals(other) {
+            return ZERO;
+        }
         self.addition(&other.negation())
     }
 
@@ -282,10 +303,27 @@ impl Relation {
     pub const fn shrink(self, limit: Limit) -> Self {
         Self::new(self.limit() - limit, self.strictness())
     }
+
+    pub fn abs(self) -> Self {
+        if self.limit() < 0 {
+            Self::new(-self.limit(), self.strictness())
+        } else {
+            self
+        }
+    }
+
+    pub const fn conjunction(self) -> Self {
+        todo!()
+    }
+
+    pub const fn disjunction(self) -> Self {
+        todo!()
+    }
 }
 
 impl Ord for Relation {
     fn cmp(&self, other: &Self) -> Ordering {
+        todo!("I am not certain that this works as expected with touching limits but different strictness");
         if self < other {
             Ordering::Less
         } else if self == other {
@@ -293,6 +331,14 @@ impl Ord for Relation {
         } else {
             Ordering::Greater
         }
+    }
+}
+
+impl Neg for Relation {
+    type Output = Relation;
+
+    fn neg(self) -> Self::Output {
+        self.negation()
     }
 }
 
@@ -767,7 +813,9 @@ mod tests {
         assert_eq!(
             "(-10, <)",
             Relation::new(10, Strictness::Weak).negation().to_string()
-        )
+        );
+        assert_eq!("(0, ≤)", ZERO.negation().to_string());
+        assert_eq!("(∞, ≤)", INFINITY.negation().to_string());
     }
 
     #[test]
@@ -910,6 +958,65 @@ mod tests {
     }
 
     #[test]
+    fn addition_commutative_property() {
+        let mut rng = rand::thread_rng();
+        let low = ZERO;
+        let high = Relation::new(50, Strictness::Strict);
+        let sampler = Uniform::new_inclusive(low, high);
+        for _ in 0..1000 {
+            let a = sampler.sample(&mut rng);
+            let b = sampler.sample(&mut rng);
+            assert_eq!(a + b, b + a);
+        }
+    }
+
+    #[test]
+    fn addition_cancels_subtraction() {
+        let mut rng = rand::thread_rng();
+        let low = ZERO;
+        let high = Relation::new(50, Strictness::Strict);
+        let sampler = Uniform::new_inclusive(low, high);
+        for _ in 0..1000 {
+            let a = sampler.sample(&mut rng);
+            let b = sampler.sample(&mut rng);
+            assert_eq!(a, a + (b - b));
+            assert_eq!(b, b + (a - a));
+            if a != ZERO && a.strictness() > b.strictness() {
+                assert_ne!(a, b + a - b);
+            }
+            if b != ZERO && b.strictness() > a.strictness() {
+                assert_ne!(b, a + b - a);
+            }
+        }
+    }
+
+    #[test]
+    fn addition_associative_property() {
+        let mut rng = rand::thread_rng();
+        let low = ZERO;
+        let high = Relation::new(50, Strictness::Strict);
+        let sampler = Uniform::new_inclusive(low, high);
+        for _ in 0..1000 {
+            let a = sampler.sample(&mut rng);
+            let b = sampler.sample(&mut rng);
+            let c = sampler.sample(&mut rng);
+            assert_eq!(a + (b + c), (a + b) + c);
+        }
+    }
+
+    #[test]
+    fn addition_identity_property() {
+        let mut rng = rand::thread_rng();
+        let low = ZERO;
+        let high = Relation::new(50, Strictness::Strict);
+        let sampler = Uniform::new_inclusive(low, high);
+        for _ in 0..1000 {
+            let a = sampler.sample(&mut rng);
+            assert_eq!(a + ZERO, a);
+        }
+    }
+
+    #[test]
     fn relation_uniform_zero() {
         let mut rng = rand::thread_rng();
         let low = ZERO;
@@ -922,6 +1029,89 @@ mod tests {
     }
 
     #[test]
+    fn subtraction_non_commutativity() {
+        let mut rng = rand::thread_rng();
+        let low = ZERO;
+        let high = Relation::new(50, Strictness::Strict);
+        let sampler = Uniform::new_inclusive(low, high);
+        for _ in 0..1000 {
+            let a = sampler.sample(&mut rng);
+            let b = sampler.sample(&mut rng);
+            if a != b {
+                assert_ne!(a - b, b - a);
+            } else {
+                assert_eq!(ZERO, a - b);
+                assert_eq!(ZERO, b - a);
+            }
+        }
+    }
+
+    #[test]
+    fn subtraction_with_identity() {
+        let mut rng = rand::thread_rng();
+        let low = ZERO;
+        let high = Relation::new(50, Strictness::Strict);
+        let sampler = Uniform::new_inclusive(low, high);
+        for _ in 0..1000 {
+            let a = sampler.sample(&mut rng);
+            assert_eq!(-a, ZERO - a, "{} =? {} = {} - {}", -a, ZERO - a, ZERO, a);
+            assert_eq!(a, a - ZERO, "{} =? {} = {} - {}", a, a - ZERO, a, ZERO);
+        }
+    }
+
+    #[test]
+    fn inversion_and_identities() {
+        let mut rng = rand::thread_rng();
+        let low = ZERO;
+        let high = Relation::new(50, Strictness::Strict);
+        let sampler = Uniform::new_inclusive(low, high);
+        for _ in 0..1000 {
+            let a = sampler.sample(&mut rng);
+            assert_eq!(ZERO, a - a);
+            assert_eq!(a, a - ZERO);
+            assert_eq!(a, a + ZERO);
+        }
+    }
+
+    #[test]
+    fn subtraction_non_associativity() {
+        let mut rng = rand::thread_rng();
+        let low = ZERO;
+        let high = Relation::new(50, Strictness::Strict);
+        let sampler = Uniform::new_inclusive(low, high);
+        for _ in 0..1000 {
+            let a = sampler.sample(&mut rng);
+            let b = sampler.sample(&mut rng);
+            let c = sampler.sample(&mut rng);
+            if c != ZERO {
+                assert_ne!(a - (b - c), (a - b) - c, "{}, {}, {}", a, b, c);
+            }
+        }
+    }
+
+    #[test]
+    fn relations() {
+        assert!(INFINITY == INFINITY);
+        assert!(INFINITY >= INFINITY);
+        assert!(INFINITY <= INFINITY);
+        assert!(!(INFINITY > INFINITY));
+        assert!(!(INFINITY < INFINITY));
+        assert!(ZERO == ZERO);
+        assert!(ZERO >= ZERO);
+        assert!(ZERO <= ZERO);
+        assert!(!(ZERO > ZERO));
+        assert!(!(ZERO < ZERO));
+        assert!(ZERO < INFINITY);
+        assert!(ZERO <= INFINITY);
+        assert!(Relation::weak(1) == Relation::weak(1));
+        assert!(Relation::strict(1) == Relation::strict(1));
+        assert!(Relation::weak(1) > Relation::strict(1));
+        assert!(Relation::weak(10) > Relation::strict(1));
+        assert!(Relation::strict(1) < Relation::weak(1));
+        assert!(Relation::strict(10) > Relation::weak(1));
+    }
+
+    #[test]
     fn relation_uniform_infinity() {
         let mut rng = rand::thread_rng();
         let low = INFINITY;
@@ -931,5 +1121,38 @@ mod tests {
             let relation = sampler.sample(&mut rng);
             assert!(relation == INFINITY)
         }
+    }
+
+    #[test]
+    fn addition() {
+        assert_eq!(ZERO.addition(&ZERO), ZERO);
+        assert_eq!(ZERO.addition(&INFINITY), INFINITY);
+        assert_eq!(INFINITY.addition(&INFINITY), INFINITY);
+        assert_eq!(
+            Relation::weak(10).addition(&Relation::weak(10)),
+            Relation::weak(20)
+        );
+        assert_eq!(
+            Relation::weak(10).addition(&Relation::strict(10)),
+            Relation::strict(20)
+        );
+        assert_eq!(
+            Relation::strict(10).addition(&Relation::weak(10)),
+            Relation::strict(20)
+        );
+        assert_eq!(
+            Relation::strict(10).addition(&Relation::strict(10)),
+            Relation::strict(20)
+        );
+    }
+
+    #[test]
+    fn abs() {
+        assert_eq!("(0, ≤)", ZERO.abs().to_string());
+        assert_eq!("(0, <)", NEGATIVE.abs().to_string());
+        assert_eq!("(10, ≤)", Relation::weak(10).abs().to_string());
+        assert_eq!("(10, ≤)", Relation::weak(-10).abs().to_string());
+        assert_eq!("(10, <)", Relation::strict(10).abs().to_string());
+        assert_eq!("(10, <)", Relation::strict(-10).abs().to_string());
     }
 }

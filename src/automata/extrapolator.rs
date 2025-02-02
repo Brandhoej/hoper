@@ -65,7 +65,7 @@ impl Extrapolator {
 
                     if !lhs_bool {
                         self.stack.push(Literal::new_false());
-                        return Bounds::empty();
+                        return Bounds::new();
                     }
 
                     let rhs_bounds = self.bounds(bounds, state, rhs);
@@ -73,7 +73,7 @@ impl Extrapolator {
 
                     if !rhs_bool {
                         self.stack.push(Literal::new_false());
-                        return Bounds::empty();
+                        return Bounds::new();
                     }
 
                     self.stack.push(Literal::new_true());
@@ -95,14 +95,14 @@ impl Extrapolator {
                     } else if rhs_bool {
                         rhs_bounds
                     } else {
-                        Bounds::empty()
+                        Bounds::new()
                     };
                 }
             },
             Expression::Group(expression) => self.bounds(bounds, state, expression),
             Expression::Literal(literal) => {
                 self.stack.push(literal.clone());
-                Bounds::empty()
+                Bounds::new()
             }
             Expression::ClockConstraint(operand, comparison, limit) => {
                 self.bounds(bounds.clone(), state, &operand);
