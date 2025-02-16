@@ -47,22 +47,62 @@ impl Display for LocationTree {
 }
 
 #[derive(Clone, Debug)]
-pub struct Traversal {
-    edge: Edge,
-    location: LocationTree,
+pub enum Traversal {
+    Step {
+        edge: Edge,
+        destination: LocationTree,
+    },
+    Stay {
+        location: LocationTree,
+    }
 }
 
 impl Traversal {
-    pub const fn new(edge: Edge, location: LocationTree) -> Self {
-        Self { edge, location }
+    pub const fn step(edge: Edge, location: LocationTree) -> Self {
+        Self::Step { edge, destination: location }
     }
 
-    pub const fn edge(&self) -> &Edge {
-        &self.edge
+    pub const fn stay(location: LocationTree) -> Self {
+        Self::Stay { location }
+    }
+
+    pub const fn edge(&self) -> Option<&Edge> {
+        match self {
+            Traversal::Step { edge, .. } => Some(edge),
+            Traversal::Stay { .. } => None,
+        }
     }
 
     pub const fn destination(&self) -> &LocationTree {
-        &self.location
+        match self {
+            Traversal::Step { destination: location, .. } | Traversal::Stay { location } => location,
+        }
+    }
+
+    pub fn conjoin(traversals: Vec<Traversal>) -> Traversal {
+        let locations = traversals
+            .iter()
+            .map(|traversal| traversal.destination().clone())
+            .collect();
+        let edges = traversals
+            .iter()
+            .filter_map(|traversal| match traversal.edge() {
+                Some(edge) => Some(edge.clone()),
+                None => None,
+            })
+            .collect();
+        Traversal::step(
+            Edge::conjoin(edges).ok().unwrap(),
+            LocationTree::new_branch(locations),
+        )
+    }
+
+    pub fn combinations(
+        traversals: impl Iterator<Item = impl Iterator<Item = Self> + Clone>,
+    ) -> impl Iterator<Item = Self> {
+        traversals
+            .multi_cartesian_product()
+            .map(|traversals| Traversal::conjoin(traversals))
     }
 }
 

@@ -149,10 +149,11 @@ impl<T: ?Sized + TIOA> TIOTS for T {
         // Closure is not applied on the state as the operations allowed on clocks
         // in the update statements will always produce a closed and non-empty state.
         let mut interpreter = Interpreter::new();
-        state = interpreter.statement(state, traversal.edge().update());
 
-        // Update the location of the state as the traversal has now completed.
-        state.set_location(traversal.destination().clone());
+        if let Traversal::Step { edge, destination } = traversal {
+            state = interpreter.statement(state, edge.update());
+            state.set_location(destination.clone());
+        }
 
         Ok(state)
     }
@@ -171,12 +172,16 @@ impl<T: ?Sized + TIOA> TIOTS for T {
 
                 // Extrapolating the state on the guard's bounds means that the state becomming a
                 // subset of the original state. This subset is the set allowed to traverse the edge.
-                let edge_bounds =
-                    extrapolator.bounds(Bounds::new(), &state, traversal.edge().guard());
-                match state.clone().extrapolate(edge_bounds) {
-                    Ok(extrapolation) => Some((extrapolation, traversal)),
-                    Err(_) => None,
+                if let Traversal::Step { ref edge, .. } = traversal {
+                    let edge_bounds =
+                        extrapolator.bounds(Bounds::new(), &state, edge.guard());
+                    return match state.clone().extrapolate(edge_bounds) {
+                        Ok(extrapolation) => Some((extrapolation, traversal)),
+                        Err(_) => None,
+                    };
                 }
+
+                Some((state.clone(), traversal))
             })
             .into_iter()
     }
@@ -271,7 +276,7 @@ mod tests {
         let mut following = automaton
             .discrete(
                 initial_state,
-                &Traversal::new(edge_01.clone(), automaton.location_tree(node_1)),
+                &Traversal::step(edge_01.clone(), automaton.location_tree(node_1)),
             )
             .unwrap();
         following = automaton.delay(following).unwrap();

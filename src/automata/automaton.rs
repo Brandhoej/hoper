@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use petgraph::{
     graph::{DiGraph, EdgeIndex, EdgeReference, NodeIndex},
-    visit::{EdgeRef, NodeRef},
+    visit::EdgeRef,
     Direction::{Incoming, Outgoing},
 };
 use symbol_table::Symbol;
@@ -88,7 +88,7 @@ impl Automaton {
         &'a self,
         edges: T,
     ) -> impl Iterator<Item = Traversal> + use<'a, T> {
-        edges.map(|edge| Traversal::new(edge.weight().clone(), self.location_tree(edge.target())))
+        edges.map(|edge| Traversal::step(edge.weight().clone(), self.location_tree(edge.target())))
     }
 
     pub fn edges<'a, T: Iterator<Item = EdgeReference<'a, Edge>> + 'a>(

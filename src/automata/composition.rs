@@ -54,7 +54,7 @@ use super::{
 ///
 /// Parallel composition over multiple automata can be extended similarly, as `Aⁱ = (((A¹ ∥ A²) ∥ A³) ...)`.
 pub struct Composition {
-    tiotas: Vec<Box<Specification>>,
+    specifications: Vec<Box<Specification>>,
     inputs: HashSet<Action>,
     outputs: HashSet<Action>,
     clocks: HashSet<Symbol>,
@@ -112,7 +112,7 @@ impl Composition {
         let clocks = union(all_clocks).collect();
 
         Ok(Self {
-            tiotas: tioas,
+            specifications: tioas,
             inputs,
             outputs,
             clocks,
@@ -122,7 +122,7 @@ impl Composition {
     }
 
     pub fn size(&self) -> usize {
-        self.tiotas.len()
+        self.specifications.len()
     }
 }
 
@@ -149,7 +149,7 @@ impl IOA for Composition {
 impl TIOA for Composition {
     fn initial_location(&self) -> LocationTree {
         LocationTree::new_branch(
-            self.tiotas
+            self.specifications
                 .iter()
                 .map(|tioa| tioa.initial_location())
                 .collect(),
@@ -161,42 +161,44 @@ impl TIOA for Composition {
         source: &LocationTree,
         action: Action,
     ) -> Result<Vec<Traversal>, ()> {
-        todo!()
-        /*if !self.actions().contains(&action) {
+        if !self.actions().contains(&action) {
             return Err(());
         }
 
-        if let LocationTree::Branch(sources) = source.clone() {
+        if let LocationTree::Branch(sources) = source {
             // It is a common action between all aggregate systems.
             // Therefore, the transition happens for all simultaneously.
             if self.common_actions.contains(&action) {
-                let moves = self
-                    .tiotas
-                    .iter()
-                    .enumerate()
-                    .map(|(i, tioas)| tioas.outgoing_moves(&sources[i], action).unwrap());
-                return Ok(Move::combinations(moves).collect());
+                // Retrieve all the outgoing traversals which is avaiable in the underlying specifications.
+                let mut traversals = Vec::with_capacity(self.specifications.len());
+                for (i, specification) in self.specifications.iter().enumerate() {
+                    match specification.outgoing_traversals(&sources[i], action) {
+                        Ok(outgoings) => traversals.push(outgoings.into_iter()),
+                        Err(_) => return Err(()),
+                    }
+                }
+
+                return Ok(Traversal::combinations(traversals.into_iter()).collect());
             }
 
-            // Q: Do we need to check before that there is a unique action?
-            // Is this santiy check guaranteed if the action is in the automaton's actions?
-            // Used to short-circuit the automaton's unique action contains check if it was found.
             let mut found_unique = false;
-            let moves = self.tiotas.iter().enumerate().map(|(i, tioas)| {
-                // Either the action is unique to the automaton or not.
-                // If it is unique to the automaton then we move from it.
-                // Otherwise, we stay put at the same location as we came from.
+            for (i, specification) in self.specifications.iter().enumerate() {
+                let mut traversals = Vec::with_capacity(self.specifications.len());
+
                 if !found_unique && self.unique_actions[i].contains(&action) {
                     found_unique = true;
-                    tioas.outgoing_moves(&sources[i], action).unwrap()
+                    match specification.outgoing_traversals(&sources[i], action) {
+                        Ok(outgoings) => traversals.push(outgoings.into_iter()),
+                        Err(_) => return Err(()),
+                    }
                 } else {
-                    vec![Move::new_delay(sources[i].clone())]
+                    let stay = Traversal::stay(sources[i].clone());
+                    traversals.push(vec![stay].into_iter());
                 }
-            });
-            return Ok(Move::combinations(moves).collect());
+            }
         }
 
-        Err(())*/
+        return Err(());
     }
 
     fn location(&self, tree: &LocationTree) -> Result<Location, ()> {
@@ -208,7 +210,7 @@ impl TIOA for Composition {
             let sub_locations = locations
                 .iter()
                 .enumerate()
-                .map(|(i, location)| self.tiotas[i].location(location));
+                .map(|(i, location)| self.specifications[i].location(location));
 
             if sub_locations
                 .clone()

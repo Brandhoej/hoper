@@ -6,7 +6,6 @@ use crate::zones::constraint::Clock;
 
 use super::{
     action::Action,
-    edge::Edge,
     ioa::IOA,
     location::Location,
     ta::TA,

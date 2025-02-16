@@ -168,6 +168,18 @@ impl Federation {
     }
 
     #[inline]
+    pub fn includes_dbm(&self, other: &DBM<Canonical>) -> bool {
+        if self.dbms.iter().all(|inner| inner.is_subset_of(other)) {
+            return true;
+        }
+
+        Federation::new(vec![other.clone()])
+            .clone()
+            .subtraction(self)
+            .is_empty()
+    }
+
+    #[inline]
     pub fn free(self, clock: Clock) -> Self {
         self.map_mut(|mut dbm| {
             dbm.free(clock);

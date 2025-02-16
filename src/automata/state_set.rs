@@ -1,12 +1,12 @@
 use std::collections::{hash_map::Entry, HashMap};
 
-use crate::zones::dbm::{Canonical, DBM};
+use crate::zones::federation::Federation;
 
 use super::{tioa::LocationTree, tiots::State};
 
 pub struct StateSet {
     // Maybe it should be a federation?
-    states: HashMap<LocationTree, DBM<Canonical>>,
+    states: HashMap<LocationTree, Federation>,
 }
 
 impl StateSet {
@@ -19,17 +19,18 @@ impl StateSet {
     pub fn insert(&mut self, state: &State) {
         match self.states.entry(state.location().clone()) {
             Entry::Occupied(mut occupied_entry) => {
-                occupied_entry.get_mut().convex_union(state.ref_zone());
+                occupied_entry.get_mut().append(state.ref_zone().clone());
             }
             Entry::Vacant(vacant_entry) => {
-                vacant_entry.insert(state.ref_zone().clone());
+                let federation = Federation::new(vec![state.ref_zone().clone()]);
+                vacant_entry.insert(federation);
             }
         };
     }
 
     pub fn contains(&self, state: &State) -> bool {
-        if let Some(zone) = self.states.get(state.location()) {
-            state.ref_zone().is_subset_of(zone)
+        if let Some(federation) = self.states.get(state.location()) {
+            federation.includes_dbm(state.ref_zone())
         } else {
             false
         }
