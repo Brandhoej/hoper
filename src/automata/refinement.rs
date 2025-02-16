@@ -1,6 +1,4 @@
-use std::
-    collections::{HashSet, VecDeque}
-;
+use std::collections::{HashSet, VecDeque};
 
 use itertools::Itertools;
 
@@ -41,7 +39,9 @@ impl RefinementStatePair {
         // The specification is more loose and has delayed more than the implementation.
         // The delays should be synchronised and therefore, the specificaiton has to be un-delayed.
         if specification_interval.included() > implementation_interval.included() {
-            let difference = specification_interval.included().difference(implementation_interval.included());
+            let difference = specification_interval
+                .included()
+                .difference(implementation_interval.included());
             specification.mut_zone().delay(difference.negate_limit());
         }
 

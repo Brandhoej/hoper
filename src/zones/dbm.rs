@@ -821,7 +821,28 @@ impl DBM<Canonical> {
         }
 
         let difference = interval_included.difference(other_included);
-        self.delay(difference.negate_limit());
+        if difference.is_infinity() {
+            self.up();
+        }
+
+        let delay = difference.negate_limit();
+
+        if delay.limit() == 0 {
+            return;
+        }
+
+        for clock in REFERENCE + 1..self.dimensions() {
+            if !self.upper(clock).is_infinity() {
+                let upper = self.upper(clock);
+                self.set_upper(
+                    clock,
+                    Relation::new(
+                        upper.limit() + delay.limit(),
+                        other_interval.upper().strictness(),
+                    ),
+                );
+            }
+        }
     }
 
     pub fn extrapolate(self, bounds: Bounds) -> Result<Self, DBM<Unsafe>> {
@@ -840,11 +861,8 @@ impl DBM<Canonical> {
 
     pub fn interval(&self) -> Interval {
         let lowest = self.lower_relations().iter().min().unwrap().clone();
-        let lowest_str = lowest.to_string();
         let start = Relation::new(-lowest.limit(), lowest.strictness());
-        let start_str = start.to_string();
         let end = self.upper_relations().iter().max().unwrap().clone();
-        let end_str = end.to_string();
         Interval::new(start, end)
     }
 }
@@ -1013,7 +1031,9 @@ mod tests {
 
     use crate::zones::{
         bounds::Bounds,
-        constraint::{Relation, RelationsSample, Strictness, UniformRelations, INFINITY, ZERO},
+        constraint::{
+            Relation, RelationsSample, Strictness, UniformRelations, INFINITY, REFERENCE, ZERO,
+        },
     };
 
     use super::{Canonical, Dirty, DBM};
@@ -1366,7 +1386,9 @@ mod tests {
         assert_eq!("[3, 5]", dbm2_interval.to_string());
         assert_eq!("(2, ≤)", dbm2_interval.included().to_string());
 
-        let difference = dbm1_interval.included().difference(dbm2_interval.included());
+        let difference = dbm1_interval
+            .included()
+            .difference(dbm2_interval.included());
         assert_eq!("(2, ≤)", difference.to_string());
 
         dbm2.delay(difference.negate_limit());
@@ -1378,11 +1400,18 @@ mod tests {
     #[test]
     fn fit_dbm2_dbm1() {
         let dbm1 = dbm1();
-        assert_eq!("-x < -1 ∧ x < 3 ∧ x - y < 1 ∧ -y < -2 ∧ y < 3 ∧ y - x < 2", dbm1.fmt_conjunctions(&vec!["x", "y"]));
+        assert_eq!(
+            "-x < -1 ∧ x < 3 ∧ x - y < 1 ∧ -y < -2 ∧ y < 3 ∧ y - x < 2",
+            dbm1.fmt_conjunctions(&vec!["x", "y"])
+        );
         assert_eq!("(3, <)", dbm1.upper(1).to_string());
         assert_eq!("(3, <)", dbm1.upper(2).to_string());
 
         let mut dbm2 = dbm2();
+        assert_eq!(
+            "-x < -1 ∧ x < 4 ∧ x - y < 2 ∧ -y < -2 ∧ y < 4 ∧ y - x < 3",
+            dbm2.fmt_conjunctions(&vec!["x", "y"])
+        );
 
         let dbm1_interval = dbm1.interval();
         assert_eq!("(1, <)", dbm1_interval.included().to_string());
@@ -1401,5 +1430,83 @@ mod tests {
         let dbm2_interval = dbm2.interval();
         assert_eq!("(1, <)", dbm2_interval.included().to_string());
         assert_eq!("(2, 3)", dbm2_interval.to_string());
+    }
+
+    #[test]
+    fn fit_closed_closed_closed_closed() {
+        let mut dbm1 = DBM::universe(1);
+        dbm1 = dbm1.tighten(REFERENCE, 1, Relation::weak(-5)).ok().unwrap();
+        dbm1 = dbm1.tighten(1, REFERENCE, Relation::weak(7)).ok().unwrap();
+        assert_eq!("[5, 7]", dbm1.interval().to_string());
+        assert_eq!("-x ≤ -5 ∧ x ≤ 7", dbm1.fmt_conjunctions(&vec!["x"]));
+
+        let mut dbm2 = DBM::universe(1);
+        dbm2 = dbm2.tighten(REFERENCE, 1, Relation::weak(-3)).ok().unwrap();
+        dbm2 = dbm2.tighten(1, REFERENCE, Relation::weak(10)).ok().unwrap();
+        assert_eq!("-x ≤ -3 ∧ x ≤ 10", dbm2.fmt_conjunctions(&vec!["x"]));
+
+        dbm2.fit(&dbm1);
+        let interval = dbm2.interval();
+        assert_eq!("[3, 5]", interval.to_string());
+        assert_eq!("(2, ≤)", interval.included().to_string());
+        assert_eq!("-x ≤ -3 ∧ x ≤ 5", dbm2.fmt_conjunctions(&vec!["x"]));
+
+        dbm2 = dbm2.dirty().close().ok().unwrap();
+        assert_eq!("-x ≤ -3 ∧ x ≤ 5", dbm2.fmt_conjunctions(&vec!["x"]));
+    }
+
+    #[test]
+    fn fit_closed_closed_closed_opened() {
+        let mut dbm1 = DBM::universe(1);
+        dbm1 = dbm1.tighten(REFERENCE, 1, Relation::weak(-5)).ok().unwrap();
+        dbm1 = dbm1.tighten(1, REFERENCE, Relation::weak(7)).ok().unwrap();
+        assert_eq!("[5, 7]", dbm1.interval().to_string());
+        assert_eq!("-x ≤ -5 ∧ x ≤ 7", dbm1.fmt_conjunctions(&vec!["x"]));
+
+        let mut dbm2 = DBM::universe(1);
+        dbm2 = dbm2.tighten(REFERENCE, 1, Relation::weak(-3)).ok().unwrap();
+        dbm2 = dbm2
+            .tighten(1, REFERENCE, Relation::strict(10))
+            .ok()
+            .unwrap();
+        assert_eq!("-x ≤ -3 ∧ x < 10", dbm2.fmt_conjunctions(&vec!["x"]));
+
+        dbm2.fit(&dbm1);
+        let interval = dbm2.interval();
+        assert_eq!("[3, 5]", interval.to_string());
+        assert_eq!("(2, ≤)", interval.included().to_string());
+        assert_eq!("-x ≤ -3 ∧ x ≤ 5", dbm2.fmt_conjunctions(&vec!["x"]));
+
+        dbm2 = dbm2.dirty().close().ok().unwrap();
+        assert_eq!("-x ≤ -3 ∧ x ≤ 5", dbm2.fmt_conjunctions(&vec!["x"]));
+    }
+
+    #[test]
+    fn fit_closed_closed_opened_opened() {
+        let mut dbm1 = DBM::universe(1);
+        dbm1 = dbm1.tighten(REFERENCE, 1, Relation::weak(-5)).ok().unwrap();
+        dbm1 = dbm1.tighten(1, REFERENCE, Relation::weak(7)).ok().unwrap();
+        assert_eq!("[5, 7]", dbm1.interval().to_string());
+        assert_eq!("-x ≤ -5 ∧ x ≤ 7", dbm1.fmt_conjunctions(&vec!["x"]));
+
+        let mut dbm2 = DBM::universe(1);
+        dbm2 = dbm2
+            .tighten(REFERENCE, 1, Relation::strict(-3))
+            .ok()
+            .unwrap();
+        dbm2 = dbm2
+            .tighten(1, REFERENCE, Relation::strict(10))
+            .ok()
+            .unwrap();
+        assert_eq!("-x < -3 ∧ x < 10", dbm2.fmt_conjunctions(&vec!["x"]));
+
+        dbm2.fit(&dbm1);
+        let interval = dbm2.interval();
+        assert_eq!("(3, 5]", interval.to_string());
+        assert_eq!("(2, <)", interval.included().to_string());
+        assert_eq!("-x < -3 ∧ x ≤ 5", dbm2.fmt_conjunctions(&vec!["x"]));
+
+        dbm2 = dbm2.dirty().close().ok().unwrap();
+        assert_eq!("-x < -3 ∧ x ≤ 5", dbm2.fmt_conjunctions(&vec!["x"]));
     }
 }

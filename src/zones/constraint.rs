@@ -320,6 +320,10 @@ impl Relation {
         }
     }
 
+    pub fn length(self) -> Self {
+        Self::new(self.limit().abs(), Strictness::Weak)
+    }
+
     pub fn negate_limit(self) -> Self {
         Self::new(-self.limit(), self.strictness())
     }

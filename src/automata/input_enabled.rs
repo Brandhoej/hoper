@@ -1,6 +1,4 @@
-use super::{
-    automaton::Automaton, conversion::Conversion, specification::Specification,
-};
+use super::{automaton::Automaton, conversion::Conversion, specification::Specification};
 
 pub trait InputEnabled
 where
