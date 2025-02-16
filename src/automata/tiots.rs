@@ -2,14 +2,13 @@ use crate::{
     automata::extrapolator::Extrapolator,
     zones::{
         bounds::Bounds,
-        constraint::Clock,
+        constraint::{Clock, Relation},
         dbm::{Canonical, DBM},
     },
 };
 
 use super::{
     action::Action,
-    edge::Edge,
     environment::Environment,
     interpreter::Interpreter,
     ioa::IOA,
@@ -112,7 +111,11 @@ where
     fn initial_state(&self) -> Result<State, ()>;
     fn delay(&self, state: State) -> Result<State, ()>;
     fn discrete(&self, state: State, traversal: &Traversal) -> Result<State, ()>;
-    fn enabled_edges(&self, state: &State, action: &Action) -> impl Iterator<Item = Edge>;
+    fn traversals(
+        &self,
+        state: &State,
+        action: &Action,
+    ) -> impl Iterator<Item = (State, Traversal)> + Clone;
 }
 
 impl<T: ?Sized + TIOA> TIOTS for T {
@@ -127,6 +130,7 @@ impl<T: ?Sized + TIOA> TIOTS for T {
         self.delay(state)
     }
 
+    /// Extrapolate the state zone on the location invariant.
     fn delay(&self, state: State) -> Result<State, ()> {
         let mut extrapolator = Extrapolator::new();
         let location = self.location(state.location()).unwrap();
@@ -138,26 +142,43 @@ impl<T: ?Sized + TIOA> TIOTS for T {
         state.extrapolate(bounds)
     }
 
+    /// Performs the discrete step over the edge updating the state with the traversal's edge update.
     fn discrete(&self, mut state: State, traversal: &Traversal) -> Result<State, ()> {
-        // Extrapolate based on the guards. If not empty then interpret the update and move.
-        let mut extrapolator = Extrapolator::new();
-        let bounds = extrapolator.bounds(Bounds::new(), &state, traversal.edge().guard());
-        match state.extrapolate(bounds) {
-            Ok(extrapolation) => state = extrapolation,
-            Err(_) => return Err(()),
-        }
-
+        // Interpreting the edge's update statement updates the clock values.
+        // This can essentially reset, assign, or something else the clock values.
+        // Closure is not applied on the state as the operations allowed on clocks
+        // in the update statements will always produce a closed and non-empty state.
         let mut interpreter = Interpreter::new();
         state = interpreter.statement(state, traversal.edge().update());
 
+        // Update the location of the state as the traversal has now completed.
         state.set_location(traversal.destination().clone());
 
         Ok(state)
     }
 
-    fn enabled_edges(&self, state: &State, action: &Action) -> impl Iterator<Item = Edge> {
-        todo!();
-        vec![].into_iter()
+    /// Returns the states enabled by the edge and the traversal.
+    fn traversals(
+        &self,
+        state: &State,
+        action: &Action,
+    ) -> impl Iterator<Item = (State, Traversal)> + Clone {
+        self.outgoing_traversals(state.location(), *action)
+            .into_iter()
+            .flatten()
+            .filter_map(move |traversal| {
+                let mut extrapolator = Extrapolator::new();
+
+                // Extrapolating the state on the guard's bounds means that the state becomming a
+                // subset of the original state. This subset is the set allowed to traverse the edge.
+                let edge_bounds =
+                    extrapolator.bounds(Bounds::new(), &state, traversal.edge().guard());
+                match state.clone().extrapolate(edge_bounds) {
+                    Ok(extrapolation) => Some((extrapolation, traversal)),
+                    Err(_) => None,
+                }
+            })
+            .into_iter()
     }
 }
 

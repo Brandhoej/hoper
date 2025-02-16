@@ -1,14 +1,9 @@
 use crate::{
     automata::expressions::Comparison,
-    zones::{
-        bounds::Bounds,
-        constraint::Relation,
-        dbm::{Canonical, Dirty, Unsafe, DBM},
-    },
+    zones::{bounds::Bounds, constraint::Relation},
 };
 
 use super::{
-    environment::Environment,
     expressions::{Binary, Expression},
     literal::Literal,
     tiots::State,
@@ -102,7 +97,7 @@ impl Extrapolator {
             Expression::Group(expression) => self.bounds(bounds, state, expression),
             Expression::Literal(literal) => {
                 self.stack.push(literal.clone());
-                Bounds::new()
+                bounds
             }
             Expression::ClockConstraint(operand, comparison, limit) => {
                 self.bounds(bounds.clone(), state, &operand);
@@ -173,85 +168,5 @@ impl Extrapolator {
                 }
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::{automata::expressions::Expression, zones::bounds::Bounds};
-
-    #[test]
-    fn extrapolate_clock_constraints() {
-        let tests: Vec<(Expression, Bounds)> = vec![
-            /*(
-                Expression::new_clock_constraint(
-                    Literal::new_identifier(1).into(),
-                    Comparison::LessThanOrEqual,
-                    Literal::new_i16(10).into(),
-                ),
-                vec![
-                    Constraint::upper(1, Relation::weak(10)),
-                    Constraint::indefinite(2),
-                ]
-                .into(),
-            ),
-            (
-                Expression::new_clock_constraint(
-                    Literal::new_identifier(1).into(),
-                    Comparison::LessThan,
-                    Literal::new_i16(10).into(),
-                ),
-                vec![
-                    Constraint::upper(1, Relation::strict(10)),
-                    Constraint::indefinite(2),
-                ]
-                .into(),
-            ),
-            (
-                Expression::new_clock_constraint(
-                    Literal::new_identifier(1).into(),
-                    Comparison::Equal,
-                    Literal::new_i16(10).into(),
-                ),
-                vec![
-                    Constraint::upper(1, Relation::weak(10)),
-                    Constraint::lower(1, Relation::weak(-10)),
-                    Constraint::indefinite(2),
-                ]
-                .into(),
-            ),
-            (
-                Expression::new_clock_constraint(
-                    Literal::new_identifier(1).into(),
-                    Comparison::GreaterThanOrEqual,
-                    Literal::new_i16(10).into(),
-                ),
-                vec![
-                    Constraint::lower(1, Relation::weak(-10)),
-                    Constraint::indefinite(1),
-                    Constraint::indefinite(2),
-                ]
-                .into(),
-            ),
-            (
-                Expression::new_clock_constraint(
-                    Literal::new_identifier(1).into(),
-                    Comparison::GreaterThan,
-                    Literal::new_i16(10).into(),
-                ),
-                vec![
-                    Constraint::lower(1, Relation::strict(-10)),
-                    Constraint::indefinite(1),
-                    Constraint::indefinite(2),
-                ]
-                .into(),
-            ),*/
-        ];
-
-        /*for (expression, expected) in tests.into_iter() {
-            let mut extrapolator = Extrapolator::new();
-            let actual = extrapolator.bounds(Bounds::delay(2), &expression);
-            assert_eq!(actual, expected);
-        }*/
     }
 }

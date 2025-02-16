@@ -1,7 +1,6 @@
-use itertools::Itertools;
-use rayon::iter::{ParallelBridge, ParallelIterator};
-
-use super::{automaton::Automaton, conversion::Conversion, specification::Specification};
+use super::{
+    automaton::Automaton, conversion::Conversion, specification::Specification,
+};
 
 pub trait InputEnabled
 where
@@ -25,12 +24,16 @@ impl InputEnabled for Automaton {
         // Computing the required zone for which the input should be enabled in is trivial. As it
         // is simply the zero valuations which is relaxed and the constrained by the invariant.
 
-        let inputs: Vec<_> = self.inputs().cloned().collect();
+        /*let inputs: Vec<_> = self.inputs().cloned().collect();
+
+        let extrapolator = Extrapolator::new();
 
         let has_disabled_inputs =
             Itertools::cartesian_product(self.node_iter(), inputs.into_iter())
                 .par_bridge()
                 .all(|(node, input)| {
+                    let location = self.location(node).unwrap();
+
                     /*self.locally_disabled(node, input)
                     .peekable()
                     .peek()
@@ -40,7 +43,7 @@ impl InputEnabled for Automaton {
 
         if has_disabled_inputs {
             return Err((self, ()));
-        }
+        }*/
 
         Conversion::Ok(Box::new(Specification::new(self)))
     }

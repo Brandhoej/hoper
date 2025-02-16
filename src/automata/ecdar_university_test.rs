@@ -25,7 +25,7 @@ mod tests {
         let slow_symbol = symbols.intern("slow");
         // Action names:
         let grant_symbol = symbols.intern("grant");
-        let news_symbol = symbols.intern("grant");
+        let news_symbol = symbols.intern("news");
 
         let clock = symbols.intern("clock");
 

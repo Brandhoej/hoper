@@ -26,8 +26,8 @@ impl Literal {
     }
 
     #[inline]
-    pub const fn new_identifier(clock: Symbol) -> Self {
-        Self::Identifier(clock)
+    pub const fn new_identifier(symbol: Symbol) -> Self {
+        Self::Identifier(symbol)
     }
 
     #[inline]

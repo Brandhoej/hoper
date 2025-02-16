@@ -106,13 +106,6 @@ impl Bounds {
         self.loosen(REFERENCE, clock, relation)
     }
 
-    pub fn set_all(mut self, bounds: impl Iterator<Item = ((Clock, Clock), Relation)>) -> Self {
-        for ((i, j), relation) in bounds {
-            self = self.set(i, j, relation);
-        }
-        self
-    }
-
     pub fn tighten_all(mut self, bounds: impl Iterator<Item = ((Clock, Clock), Relation)>) -> Self {
         for ((i, j), relation) in bounds {
             self = self.tighten(i, j, relation);
@@ -123,6 +116,13 @@ impl Bounds {
     pub fn loosen_all(mut self, bounds: impl Iterator<Item = ((Clock, Clock), Relation)>) -> Self {
         for ((i, j), relation) in bounds {
             self = self.loosen(i, j, relation);
+        }
+        self
+    }
+
+    pub fn set_all(mut self, bounds: impl Iterator<Item = ((Clock, Clock), Relation)>) -> Self {
+        for ((i, j), relation) in bounds {
+            self = self.set(i, j, relation);
         }
         self
     }
@@ -230,5 +230,16 @@ mod tests {
             .tighten_upper(1, Relation::weak(20));
         assert_eq!(bounds.upper(1).unwrap(), Relation::weak(20));
         assert_eq!(bounds.lower(1).unwrap(), Relation::weak(-10));
+    }
+
+    #[test]
+    fn bounds_tighten() {
+        let bounds = Bounds::new()
+            .set_lower(1, Relation::weak(-5))
+            .set_upper(1, Relation::weak(25))
+            .tighten_lower(1, Relation::strict(-5))
+            .tighten_upper(1, Relation::strict(25));
+        assert_eq!(bounds.lower(1).unwrap(), Relation::strict(-5));
+        assert_eq!(bounds.upper(1).unwrap(), Relation::strict(25));
     }
 }

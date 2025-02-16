@@ -46,7 +46,7 @@ impl Display for LocationTree {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Traversal {
     edge: Edge,
     location: LocationTree,

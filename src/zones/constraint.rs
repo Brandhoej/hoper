@@ -312,18 +312,21 @@ impl Relation {
         }
     }
 
-    pub const fn conjunction(self) -> Self {
-        todo!()
+    pub fn difference(self, other: Self) -> Self {
+        if self > other {
+            self - other
+        } else {
+            other - self
+        }
     }
 
-    pub const fn disjunction(self) -> Self {
-        todo!()
+    pub fn negate_limit(self) -> Self {
+        Self::new(-self.limit(), self.strictness())
     }
 }
 
 impl Ord for Relation {
     fn cmp(&self, other: &Self) -> Ordering {
-        todo!("I am not certain that this works as expected with touching limits but different strictness");
         if self < other {
             Ordering::Less
         } else if self == other {
@@ -1154,5 +1157,11 @@ mod tests {
         assert_eq!("(10, ≤)", Relation::weak(-10).abs().to_string());
         assert_eq!("(10, <)", Relation::strict(10).abs().to_string());
         assert_eq!("(10, <)", Relation::strict(-10).abs().to_string());
+    }
+
+    #[test]
+    fn difference() {
+        assert_eq!("(2, <)", ZERO.difference(Relation::strict(2)).to_string());
+        assert_eq!("(2, ≤)", ZERO.difference(Relation::weak(2)).to_string());
     }
 }

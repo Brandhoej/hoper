@@ -5,6 +5,7 @@ use bitset::BitSet;
 use super::{
     bounds::Bounds,
     constraint::{Clock, Limit, Relation, Strictness, INFINITY, REFERENCE, ZERO},
+    intervals::Interval,
 };
 
 pub trait DBMState: Sized {}
@@ -89,6 +90,8 @@ impl<State: DBMState> DBM<State> {
 
     #[inline]
     fn set_upper(&mut self, clock: Clock, relation: Relation) {
+        assert!(relation.limit() >= 0);
+
         let index = self.index(clock, REFERENCE);
         self.relations[index] = relation
     }
@@ -100,6 +103,8 @@ impl<State: DBMState> DBM<State> {
 
     #[inline]
     fn set_lower(&mut self, clock: Clock, relation: Relation) {
+        assert!(relation.limit() <= 0);
+
         let index = self.index(REFERENCE, clock);
         self.relations[index] = relation
     }
@@ -805,6 +810,20 @@ impl DBM<Canonical> {
         dbm.clean().ok().unwrap()
     }
 
+    pub fn fit(&mut self, other: &Self) {
+        let interval = self.interval();
+        let interval_included = interval.included();
+        let other_interval = other.interval();
+        let other_included = other_interval.included();
+
+        if interval_included < other_included {
+            panic!("will not be closed");
+        }
+
+        let difference = interval_included.difference(other_included);
+        self.delay(difference.negate_limit());
+    }
+
     pub fn extrapolate(self, bounds: Bounds) -> Result<Self, DBM<Unsafe>> {
         match self.dirty().extrapolate(bounds) {
             Ok(dbm) => dbm.clean(),
@@ -819,18 +838,14 @@ impl DBM<Canonical> {
             .unwrap()
     }
 
-    pub fn lower_difference(&self, lower: &Vec<Relation>) -> Relation {
-        (REFERENCE + 1..self.dimensions())
-            .map(|clock| self.lower(clock).subtraction(&lower[clock as usize]))
-            .min()
-            .unwrap()
-    }
-
-    pub fn upper_difference(&self, upper: &Vec<Relation>) -> Relation {
-        (REFERENCE + 1..self.dimensions())
-            .map(|clock| self.upper(clock).subtraction(&upper[clock as usize]))
-            .min()
-            .unwrap()
+    pub fn interval(&self) -> Interval {
+        let lowest = self.lower_relations().iter().min().unwrap().clone();
+        let lowest_str = lowest.to_string();
+        let start = Relation::new(-lowest.limit(), lowest.strictness());
+        let start_str = start.to_string();
+        let end = self.upper_relations().iter().max().unwrap().clone();
+        let end_str = end.to_string();
+        Interval::new(start, end)
     }
 }
 
@@ -993,7 +1008,7 @@ impl IndexMut<(Clock, Clock)> for DBM<Dirty> {
 
 #[cfg(test)]
 mod tests {
-    use itertools::min;
+
     use rand::distributions::uniform::UniformSampler;
 
     use crate::zones::{
@@ -1263,370 +1278,128 @@ mod tests {
     }
 
     #[test]
-    fn delays_from_zero() {
-        let mut dbm = DBM::zero(2);
-        assert_eq!(dbm.duration(), ZERO);
+    fn duration() {
+        let zero = DBM::zero(1);
+        assert_eq!(ZERO, zero.duration());
 
-        dbm.delay(Relation::weak(1));
-        assert_eq!(dbm.duration(), Relation::weak(1));
+        let universe = DBM::universe(1);
+        assert_eq!(INFINITY, universe.duration());
 
-        dbm.delay(Relation::weak(-1));
-        assert_eq!(dbm.duration(), ZERO);
+        let mut dbm1 = DBM::zero(1);
+        dbm1.set_lower(1, Relation::weak(-1));
+        dbm1.set_upper(1, Relation::weak(1));
+        assert_eq!("-x ≤ -1 ∧ x ≤ 1", dbm1.fmt_conjunctions(&vec!["x"]));
+        assert_eq!(ZERO, dbm1.duration());
 
-        dbm.delay(Relation::weak(10));
-        assert_eq!(dbm.duration(), Relation::weak(10));
+        let mut dbm2 = DBM::zero(1);
+        dbm2.set_lower(1, Relation::weak(-1));
+        dbm2.set_upper(1, Relation::weak(2));
+        assert_eq!("-x ≤ -1 ∧ x ≤ 2", dbm2.fmt_conjunctions(&vec!["x"]));
+        assert_eq!(Relation::weak(1), dbm2.duration());
 
-        dbm.delay(Relation::weak(-5));
-        assert_eq!(dbm.duration(), Relation::weak(5));
+        let mut dbm3 = DBM::zero(1);
+        dbm3.set_lower(1, Relation::strict(-1));
+        dbm3.set_upper(1, Relation::weak(2));
+        assert_eq!("-x < -1 ∧ x ≤ 2", dbm3.fmt_conjunctions(&vec!["x"]));
+        assert_eq!(Relation::strict(1), dbm3.duration());
 
-        dbm.delay(Relation::weak(-1));
-        assert_eq!(dbm.duration(), Relation::weak(4));
+        let mut dbm4 = DBM::zero(1);
+        dbm4.set_lower(1, Relation::strict(-1));
+        dbm4.set_upper(1, Relation::strict(2));
+        assert_eq!("-x < -1 ∧ x < 2", dbm4.fmt_conjunctions(&vec!["x"]));
+        assert_eq!(Relation::strict(1), dbm4.duration());
+
+        let mut dbm5 = DBM::zero(1);
+        dbm5.set_lower(1, Relation::weak(-1));
+        dbm5.set_upper(1, Relation::strict(2));
+        assert_eq!("-x ≤ -1 ∧ x < 2", dbm5.fmt_conjunctions(&vec!["x"]));
+        assert_eq!(Relation::strict(1), dbm5.duration());
     }
 
     #[test]
-    fn delays_from_universe() {
-        let mut dbm = DBM::universe(2);
-        assert_eq!(dbm.duration(), INFINITY);
+    fn interval() {
+        let zero = DBM::zero(1);
+        assert_eq!("[0, 0]", zero.interval().to_string());
 
-        dbm.delay(Relation::weak(10));
-        assert_eq!(dbm.duration(), INFINITY);
+        let universe = DBM::universe(1);
+        assert_eq!("[0, ∞]", universe.interval().to_string());
 
-        dbm.delay(Relation::weak(-5));
-        assert_eq!(dbm.duration(), INFINITY);
+        let mut dbm1 = DBM::zero(1);
+        dbm1.set_lower(1, Relation::weak(-1));
+        dbm1.set_upper(1, Relation::weak(1));
+        assert_eq!("[1, 1]", dbm1.interval().to_string());
+
+        let mut dbm2 = DBM::zero(1);
+        dbm2.set_lower(1, Relation::weak(-3));
+        dbm2.set_upper(1, Relation::weak(5));
+        assert_eq!("[3, 5]", dbm2.interval().to_string());
+
+        let mut dbm3 = DBM::zero(1);
+        dbm3.set_lower(1, Relation::strict(-3));
+        dbm3.set_upper(1, Relation::strict(5));
+        assert_eq!("(3, 5)", dbm3.interval().to_string());
+
+        let mut dbm4 = DBM::zero(1);
+        dbm4.set_lower(1, Relation::weak(-3));
+        dbm4.set_upper(1, Relation::strict(5));
+        assert_eq!("[3, 5)", dbm4.interval().to_string());
+
+        let mut dbm5 = DBM::zero(1);
+        dbm5.set_lower(1, Relation::strict(-3));
+        dbm5.set_upper(1, Relation::weak(5));
+        assert_eq!("(3, 5]", dbm5.interval().to_string());
     }
 
     #[test]
-    fn delays_dbm1() {
-        let mut dbm = dbm1();
-        assert_eq!(dbm.duration(), Relation::strict(1));
+    fn fit_full_example() {
+        let mut dbm1 = DBM::zero(1);
+        dbm1.set_lower(1, Relation::weak(-1));
+        dbm1.set_upper(1, Relation::weak(1));
+        let dbm1_interval = dbm1.interval();
+        assert_eq!("[1, 1]", dbm1_interval.to_string());
+        assert_eq!("(0, ≤)", dbm1_interval.included().to_string());
 
-        dbm.delay(Relation::weak(4));
-        assert_eq!(dbm.duration(), Relation::strict(5));
+        let mut dbm2 = DBM::zero(1);
+        dbm2.set_lower(1, Relation::weak(-3));
+        dbm2.set_upper(1, Relation::weak(5));
+        let dbm2_interval = dbm2.interval();
+        assert_eq!("[3, 5]", dbm2_interval.to_string());
+        assert_eq!("(2, ≤)", dbm2_interval.included().to_string());
 
-        dbm.up();
-        assert_eq!(dbm.duration(), INFINITY);
+        let difference = dbm1_interval.included().difference(dbm2_interval.included());
+        assert_eq!("(2, ≤)", difference.to_string());
 
-        dbm.down();
-        assert_eq!(dbm.duration(), INFINITY);
-
-        dbm.free(1);
-        assert_eq!(dbm.duration(), INFINITY);
-
-        dbm.reset(1, 10);
-        assert_eq!(dbm.duration(), Relation::weak(0));
+        dbm2.delay(difference.negate_limit());
+        let dbm2_interval = dbm2.interval();
+        assert_eq!("[3, 3]", dbm2_interval.to_string());
+        assert_eq!("(0, ≤)", dbm2_interval.included().to_string());
     }
 
     #[test]
-    fn shifted_zero() {
-        let mut dbm = DBM::zero(1);
-        let original_lower_relation = dbm.lower_relations();
-        assert_eq!("(0, ≤)", original_lower_relation[0].to_string());
-        assert_eq!("(0, ≤)", original_lower_relation[1].to_string());
+    fn fit_dbm2_dbm1() {
+        let dbm1 = dbm1();
+        assert_eq!("-x < -1 ∧ x < 3 ∧ x - y < 1 ∧ -y < -2 ∧ y < 3 ∧ y - x < 2", dbm1.fmt_conjunctions(&vec!["x", "y"]));
+        assert_eq!("(3, <)", dbm1.upper(1).to_string());
+        assert_eq!("(3, <)", dbm1.upper(2).to_string());
 
-        dbm.shift_all(Relation::weak(10));
-        let after_shift_lower_relations = dbm.lower_relations();
-        assert_eq!("(0, ≤)", after_shift_lower_relations[0].to_string());
-        assert_eq!("(-10, ≤)", after_shift_lower_relations[1].to_string());
+        let mut dbm2 = dbm2();
 
-        let shifted_by = dbm.lower_difference(&original_lower_relation);
-        assert_eq!("(-10, ≤)", shifted_by.to_string());
+        let dbm1_interval = dbm1.interval();
+        assert_eq!("(1, <)", dbm1_interval.included().to_string());
+        assert_eq!("(2, 3)", dbm1_interval.to_string());
 
-        dbm.shift_all(Relation::weak(-10));
-        assert!(dbm.is_eq(&DBM::zero(1)));
-    }
+        let dbm2_interval = dbm2.interval();
+        assert_eq!("(2, <)", dbm2_interval.included().to_string());
+        assert_eq!("(2, 4)", dbm2_interval.to_string());
 
-    #[test]
-    fn shifted_dbm1() {
-        let mut dbm = dbm1();
-        let original_lower_relations = dbm.lower_relations();
-        assert_eq!("(0, ≤)", original_lower_relations[0].to_string());
-        assert_eq!("(-1, <)", original_lower_relations[1].to_string());
-        assert_eq!("(-2, <)", original_lower_relations[2].to_string());
+        dbm2.fit(&dbm1);
 
-        dbm.shift_all(Relation::weak(10));
-        let after_shift_lower_relations = dbm.lower_relations();
-        assert_eq!("(0, ≤)", after_shift_lower_relations[0].to_string());
-        assert_eq!("(-11, <)", after_shift_lower_relations[1].to_string());
-        assert_eq!("(-12, <)", after_shift_lower_relations[2].to_string());
+        let dbm1_interval = dbm1.interval();
+        assert_eq!("(1, <)", dbm1_interval.included().to_string());
+        assert_eq!("(2, 3)", dbm1_interval.to_string());
 
-        let shifted_by = dbm.lower_difference(&original_lower_relations);
-        assert_eq!("(-10, <)", shifted_by.to_string());
-
-        dbm.shift_all(Relation::weak(-10));
-        assert!(dbm.is_eq(&dbm1()));
-    }
-
-    #[test]
-    fn delayed_dbm3() {
-        let mut dbm = dbm3();
-        let original_upper_relations = dbm.upper_relations();
-        assert_eq!("(0, ≤)", original_upper_relations[0].to_string());
-        assert_eq!("(3, ≤)", original_upper_relations[1].to_string());
-
-        dbm.delay(Relation::weak(10));
-        let after_delay_upper_relations = dbm.upper_relations();
-        assert_eq!("(0, ≤)", after_delay_upper_relations[0].to_string());
-        assert_eq!("(13, ≤)", after_delay_upper_relations[1].to_string());
-
-        let delayed_by = dbm.upper_difference(&original_upper_relations);
-        assert_eq!("(10, <)", delayed_by.to_string());
-
-        dbm.delay(Relation::weak(-10));
-        assert!(dbm.is_eq(&dbm3()));
-    }
-
-    #[test]
-    fn bounds_guards_example_difference_1() {
-        // Interval of [2, 5):
-        let mut dbm = DBM::zero(1);
-        dbm.set_lower(1, Relation::weak(-2));
-        dbm.set_upper(1, Relation::strict(5));
-        assert_eq!("-x ≤ -2 ∧ x < 5", dbm.fmt_conjunctions(&vec!["x"]));
-
-        // Bounds 1: Describes a guard where x > 3.
-        let mut bounds_1 = Bounds::new();
-        bounds_1 = bounds_1.set_lower(1, Relation::strict(-3));
-
-        let extrapolation_1 = dbm.clone().extrapolate(bounds_1).ok().unwrap();
-        assert_eq!(
-            "-x < -3 ∧ x < 5",
-            extrapolation_1.fmt_conjunctions(&vec!["x"])
-        );
-
-        let lower_difference_1 = extrapolation_1.lower_difference(&dbm.lower_relations());
-        assert_eq!("(-1, <)", lower_difference_1.to_string());
-
-        let upper_difference_1 = extrapolation_1.upper_difference(&dbm.upper_relations());
-        assert_eq!("(0, ≤)", upper_difference_1.to_string());
-
-        assert_eq!(
-            "(2, <)",
-            extrapolation_1.duration().to_string(),
-            "'x > 3 and x < 5' allows a max delay just less than two"
-        );
-
-        // Bounds 2: Describes a guard where x > 4.
-        let mut bounds_2 = Bounds::new();
-        bounds_2 = bounds_2.set_lower(1, Relation::strict(-4));
-
-        let extrapolation_2 = dbm.clone().extrapolate(bounds_2).ok().unwrap();
-        assert_eq!(
-            "-x < -4 ∧ x < 5",
-            extrapolation_2.fmt_conjunctions(&vec!["x"])
-        );
-
-        let lower_difference_2 = extrapolation_2.lower_difference(&dbm.lower_relations());
-        assert_eq!("(-2, <)", lower_difference_2.to_string());
-
-        let upper_difference_2 = extrapolation_2.upper_difference(&dbm.upper_relations());
-        assert_eq!("(0, ≤)", upper_difference_2.to_string());
-
-        assert_eq!(
-            "(1, <)",
-            extrapolation_2.duration().to_string(),
-            "'x > 4 and x < 5' allows a max delay just less than one"
-        );
-
-        assert!(
-            lower_difference_1 > lower_difference_2,
-            "guard 1 is enabled before guard 2"
-        );
-        assert!(
-            upper_difference_1 == upper_difference_2,
-            "guard 1 and guard 2 are enabled to the same point"
-        )
-    }
-
-    #[test]
-    fn bounds_guards_example_difference_2() {
-        // Interval of [2, 5):
-        let mut dbm = DBM::zero(1);
-        dbm.set_lower(1, Relation::weak(-2));
-        dbm.set_upper(1, Relation::weak(5));
-        assert_eq!("-x ≤ -2 ∧ x ≤ 5", dbm.fmt_conjunctions(&vec!["x"]));
-
-        // Bounds 1: Describes a guard where 3 ≤ x.
-        let mut bounds_1 = Bounds::new();
-        bounds_1 = bounds_1.set_lower(1, Relation::weak(-3));
-
-        let extrapolation_1 = dbm.clone().extrapolate(bounds_1).ok().unwrap();
-        assert_eq!(
-            "-x ≤ -3 ∧ x ≤ 5",
-            extrapolation_1.fmt_conjunctions(&vec!["x"])
-        );
-
-        let lower_difference_1 = extrapolation_1.lower_difference(&dbm.lower_relations());
-        assert_eq!("(-1, <)", lower_difference_1.to_string());
-
-        let upper_difference_1 = extrapolation_1.upper_difference(&dbm.upper_relations());
-        assert_eq!("(0, ≤)", upper_difference_1.to_string());
-
-        assert_eq!(
-            "(2, ≤)",
-            extrapolation_1.duration().to_string(),
-            "'x > 3 and x ≤ 5' allows a max delay of two"
-        );
-
-        // Bounds 2: Describes a guard where x > 4.
-        let mut bounds_2 = Bounds::new();
-        bounds_2 = bounds_2.set_lower(1, Relation::strict(-4));
-
-        let extrapolation_2 = dbm.clone().extrapolate(bounds_2).ok().unwrap();
-        assert_eq!(
-            "-x < -4 ∧ x ≤ 5",
-            extrapolation_2.fmt_conjunctions(&vec!["x"])
-        );
-
-        let lower_difference_2 = extrapolation_2.lower_difference(&dbm.lower_relations());
-        assert_eq!("(-2, <)", lower_difference_2.to_string());
-
-        let upper_difference_2 = extrapolation_2.upper_difference(&dbm.upper_relations());
-        assert_eq!("(0, ≤)", upper_difference_2.to_string());
-
-        assert_eq!(
-            "(1, <)",
-            extrapolation_2.duration().to_string(),
-            "'x > 4 and x ≤ 5' allows a max delay of one"
-        );
-
-        assert!(
-            lower_difference_1 > lower_difference_2,
-            "guard 1 is enabled before guard 2"
-        );
-        assert!(
-            upper_difference_1 == upper_difference_2,
-            "guard 1 and guard 2 are enabled to the same point"
-        )
-    }
-
-    #[test]
-    fn delays() {
-        // Interval of [2, 5]:
-        let mut dbm = DBM::zero(1);
-        dbm.set_lower(1, Relation::weak(-2));
-        dbm.set_upper(1, Relation::weak(5));
-        assert_eq!("-x ≤ -2 ∧ x ≤ 5", dbm.fmt_conjunctions(&vec!["x"]));
-        assert_eq!("(3, ≤)", dbm.duration().to_string());
-
-        dbm.delay(Relation::weak(-1));
-        assert_eq!("(2, ≤)", dbm.duration().to_string());
-
-        dbm.delay(Relation::strict(-1));
-        assert_eq!("(1, <)", dbm.duration().to_string());
-
-        dbm.delay(Relation::weak(1));
-        assert_eq!("(2, <)", dbm.duration().to_string());
-
-        dbm.delay(Relation::weak(-1));
-        assert_eq!("(1, <)", dbm.duration().to_string());
-    }
-
-    #[test]
-    fn example_matching_delays() {
-        // Zone 1: Interval of [2, 5]:
-        let mut dbm_1 = DBM::zero(1);
-        dbm_1.set_lower(1, Relation::weak(-2));
-        dbm_1.set_upper(1, Relation::weak(5));
-        assert_eq!("-x ≤ -2 ∧ x ≤ 5", dbm_1.fmt_conjunctions(&vec!["x"]));
-
-        // Edge 1: Guard (2, 9]
-        let mut edge_1 = dbm_1.minimal_bounds();
-        edge_1 = edge_1.tighten_lower(1, Relation::weak(-2));
-        edge_1 = edge_1.tighten_upper(1, Relation::weak(9));
-
-        let extrapolation_1 = dbm_1.clone().extrapolate(edge_1).ok().unwrap();
-        assert_eq!("(-2, ≤)", dbm_1.lower(1).to_string());
-        assert_eq!("(-2, ≤)", extrapolation_1.lower(1).to_string());
-
-        let delay_1 = extrapolation_1.lower_difference(&dbm_1.lower_relations());
-        let duration_1 = extrapolation_1.duration();
-        assert_eq!(
-            "-x ≤ -2 ∧ x ≤ 5",
-            extrapolation_1.fmt_conjunctions(&vec!["x"])
-        );
-        assert_eq!(
-            "(3, ≤)",
-            duration_1.to_string(),
-            "the guard is enabled for exactly 3 time units"
-        );
-        assert_eq!(
-            "(0, ≤)",
-            delay_1.to_string(),
-            "the guard is immediately enabled"
-        );
-
-        // Zone 2: Interval of [2, 8]:
-        let mut dbm_2 = DBM::zero(1);
-        dbm_2.set_lower(1, Relation::weak(-2));
-        dbm_2.set_upper(1, Relation::weak(8));
-        assert_eq!("-x ≤ -2 ∧ x ≤ 8", dbm_2.fmt_conjunctions(&vec!["x"]));
-
-        // Edge 2: Guard (4, 6)
-        let mut edge_2 = dbm_2.minimal_bounds();
-        edge_2 = edge_2.tighten_lower(1, Relation::strict(-4));
-        edge_2 = edge_2.tighten_upper(1, Relation::strict(6));
-
-        let extrapolation_2 = dbm_2.clone().extrapolate(edge_2).ok().unwrap();
-        assert_eq!("(-2, ≤)", dbm_2.lower(1).to_string());
-        assert_eq!("(-4, <)", extrapolation_2.lower(1).to_string());
-
-        let delay_2 = extrapolation_2.lower_difference(&dbm_2.lower_relations());
-        let duration_2 = extrapolation_2.duration();
-        assert_eq!(
-            "-x < -4 ∧ x < 6",
-            extrapolation_2.fmt_conjunctions(&vec!["x"])
-        );
-        assert_eq!(
-            "(2, <)",
-            duration_2.to_string(),
-            "to guard is enabled for exactly 2 time units"
-        );
-        assert_eq!(
-            "(-2, <)",
-            delay_2.to_string(),
-            "to enable the guard we must delay just less than 2 time units"
-        );
-
-        // Q: How long do we have to wait to enable the "slowest" guard?
-        // A: The maximum delay of the guards.
-        let required_dely = min(vec![delay_1, delay_2]).unwrap();
-        // The required delay is "negative" because lower constraints are described with negative limits.
-        assert_eq!(
-            "(-2, <)",
-            required_dely.to_string(),
-            "more than a delay of 2 time units are required"
-        );
-
-        // Q: What are the corrected durations?
-        let durations: Vec<_> = vec![(duration_1, delay_1), (duration_2, delay_2)]
-            .into_iter()
-            .map(|(duration, delay)| (duration - delay) + required_dely)
-            .collect();
-        assert_eq!("(1, <)", durations[0].to_string());
-        assert_eq!("(2, <)", durations[1].to_string());
-
-        // Q: Is it possible for all edges to be enabled?
-        let all_enabled = durations.iter().all(|duration| *duration >= ZERO);
-        assert!(all_enabled);
-
-        let mut after_1 = extrapolation_1.clone();
-        after_1.shift_all(delay_1 - required_dely);
-        assert_eq!("(2, ≤)", (delay_1 - required_dely).to_string());
-        assert_eq!(
-            "-x < -4 ∧ x ≤ 7",
-            after_1.fmt_conjunctions(&vec!["x"]),
-            "[2, 5] shifted by (2, ≤) to (4, 7]"
-        );
-        assert_eq!("(3, <)", after_1.duration().to_string());
-
-        let mut after_2 = extrapolation_2.clone();
-        after_2.shift_all(delay_2 - required_dely);
-        assert_eq!("(0, ≤)", (delay_2 - required_dely).to_string());
-        assert_eq!(
-            "-x < -4 ∧ x < 6",
-            after_2.fmt_conjunctions(&vec!["x"]),
-            "(4, 6)"
-        );
-        assert_eq!("(2, <)", after_2.duration().to_string());
+        let dbm2_interval = dbm2.interval();
+        assert_eq!("(1, <)", dbm2_interval.included().to_string());
+        assert_eq!("(2, 3)", dbm2_interval.to_string());
     }
 }

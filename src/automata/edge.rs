@@ -37,7 +37,7 @@ impl Edge {
     /// It is guarded by a boolean expression which must be satisfied for it to be enabled.
     /// When the edge is traversed the update is executed on the state yielding a new state.
     pub const fn new_output(action: Action, guard: Expression, update: Statement) -> Self {
-        Edge::new(Channel::In(action), guard, update)
+        Edge::new(Channel::Out(action), guard, update)
     }
 
     /// Creates a conjoined edge from all the edges where the guard is a conjunction and the updates
