@@ -2,7 +2,7 @@ use crate::{
     automata::extrapolator::Extrapolator,
     zones::{
         bounds::Bounds,
-        constraint::{Clock, Relation},
+        constraint::Clock,
         dbm::{Canonical, DBM},
     },
 };
@@ -173,8 +173,7 @@ impl<T: ?Sized + TIOA> TIOTS for T {
                 // Extrapolating the state on the guard's bounds means that the state becomming a
                 // subset of the original state. This subset is the set allowed to traverse the edge.
                 if let Traversal::Step { ref edge, .. } = traversal {
-                    let edge_bounds =
-                        extrapolator.bounds(Bounds::new(), &state, edge.guard());
+                    let edge_bounds = extrapolator.bounds(Bounds::new(), &state, edge.guard());
                     return match state.clone().extrapolate(edge_bounds) {
                         Ok(extrapolation) => Some((extrapolation, traversal)),
                         Err(_) => None,
@@ -201,6 +200,7 @@ mod tests {
         expressions::{Comparison, Expression},
         literal::Literal,
         location::Location,
+        partitioned_symbol_table::PartitionedSymbolTable,
         statements::Statement,
         tioa::{LocationTree, Traversal, TIOA},
         tiots::TIOTS,
@@ -208,11 +208,11 @@ mod tests {
 
     #[test]
     fn test_automaton_1() {
-        let symbols = SymbolTable::new();
-        let loc_0 = symbols.intern("0");
-        let loc_1 = symbols.intern("1");
-        let moved_symbol = symbols.intern("moved");
-        let clock = symbols.intern("clock");
+        let symbols = PartitionedSymbolTable::new();
+        let loc_0 = symbols.intern(0, "0");
+        let loc_1 = symbols.intern(0, "1");
+        let moved_symbol = symbols.intern(0, "moved");
+        let clock = symbols.intern(0, "clock");
 
         let mut graph = DiGraph::new();
         let node_0 = graph.add_node(Location::new(

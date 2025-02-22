@@ -5,7 +5,6 @@ use petgraph::{
     visit::EdgeRef,
     Direction::{Incoming, Outgoing},
 };
-use symbol_table::Symbol;
 
 use crate::zones::constraint::Clock;
 
@@ -15,6 +14,7 @@ use super::{
     edge::Edge,
     ioa::IOA,
     location::Location,
+    partitioned_symbol_table::PartitionedSymbol,
     ta::TA,
     tioa::{LocationTree, Traversal, TIOA},
 };
@@ -26,7 +26,7 @@ use super::{
 pub struct Automaton {
     initial: NodeIndex,
     graph: DiGraph<Location, Edge>,
-    clocks: HashSet<Symbol>,
+    clocks: HashSet<PartitionedSymbol>,
     inputs: HashSet<Action>,
     outputs: HashSet<Action>,
 }
@@ -35,7 +35,7 @@ impl Automaton {
     pub fn new(
         initial: NodeIndex,
         graph: DiGraph<Location, Edge>,
-        clocks: HashSet<Symbol>,
+        clocks: HashSet<PartitionedSymbol>,
     ) -> Result<Self, ()> {
         let mut inputs = HashSet::new();
         let mut outputs = HashSet::new();
@@ -149,7 +149,7 @@ impl Automaton {
     pub fn filter_by_action_id<'a>(
         &'a self,
         edges: impl Iterator<Item = EdgeReference<'a, Edge>> + 'a,
-        letter: Symbol,
+        letter: PartitionedSymbol,
     ) -> impl Iterator<Item = EdgeReference<'a, Edge>> {
         edges.filter(move |reference| match reference.weight().channel() {
             Channel::In(action) | Channel::Out(action) => *action.letter() == letter,
@@ -195,7 +195,7 @@ impl Automaton {
 }
 
 impl TA for Automaton {
-    fn clocks(&self) -> HashSet<Symbol> {
+    fn clocks(&self) -> HashSet<PartitionedSymbol> {
         self.clocks.clone()
     }
 
@@ -250,18 +250,19 @@ mod tests {
     use std::collections::HashSet;
 
     use petgraph::graph::DiGraph;
-    use symbol_table::SymbolTable;
 
-    use crate::automata::{literal::Literal, statements::Statement};
+    use crate::automata::{
+        literal::Literal, partitioned_symbol_table::PartitionedSymbolTable, statements::Statement,
+    };
 
     use super::{Action, Automaton, Edge, Location};
 
     #[test]
     fn test_simple_tioa() {
-        let symbols = SymbolTable::new();
-        let symbol_input = symbols.intern("input");
-        let symbol_a = symbols.intern("A");
-        let symbol_b = symbols.intern("B");
+        let symbols = PartitionedSymbolTable::new();
+        let symbol_input = symbols.intern(0, "input");
+        let symbol_a = symbols.intern(0, "A");
+        let symbol_b = symbols.intern(0, "B");
         let mut graph = DiGraph::new();
         let node_a = graph.add_node(Location::with_name(symbol_a));
         let node_b = graph.add_node(Location::with_name(symbol_b));

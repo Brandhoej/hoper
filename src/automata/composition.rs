@@ -12,6 +12,7 @@ use super::{
     edge::Edge,
     ioa::IOA,
     location::Location,
+    partitioned_symbol_table::PartitionedSymbol,
     specification::Specification,
     ta::TA,
     tioa::{LocationTree, Traversal, TIOA},
@@ -57,7 +58,7 @@ pub struct Composition {
     specifications: Vec<Box<Specification>>,
     inputs: HashSet<Action>,
     outputs: HashSet<Action>,
-    clocks: HashSet<Symbol>,
+    clocks: HashSet<PartitionedSymbol>,
     unique_actions: Vec<HashSet<Action>>,
     common_actions: HashSet<Action>,
 }
@@ -127,7 +128,7 @@ impl Composition {
 }
 
 impl TA for Composition {
-    fn clocks(&self) -> HashSet<Symbol> {
+    fn clocks(&self) -> HashSet<PartitionedSymbol> {
         self.clocks.clone()
     }
 

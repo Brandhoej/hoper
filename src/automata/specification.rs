@@ -8,6 +8,7 @@ use super::{
     action::Action,
     ioa::IOA,
     location::Location,
+    partitioned_symbol_table::PartitionedSymbol,
     ta::TA,
     tioa::{LocationTree, Traversal, TIOA},
 };
@@ -32,7 +33,7 @@ impl Specification {
 }
 
 impl TA for Specification {
-    fn clocks(&self) -> HashSet<Symbol> {
+    fn clocks(&self) -> HashSet<PartitionedSymbol> {
         self.0.clocks()
     }
 
@@ -78,15 +79,16 @@ mod tests {
 
     use crate::automata::{
         action::Action, automaton::Automaton, edge::Edge, input_enabled::InputEnabled,
-        literal::Literal, location::Location, statements::Statement,
+        literal::Literal, location::Location, partitioned_symbol_table::PartitionedSymbolTable,
+        statements::Statement,
     };
 
     #[test]
     fn test() {
-        let symbols = SymbolTable::new();
-        let symbol_input = symbols.intern("input");
-        let symbol_a = symbols.intern("A");
-        let symbol_b = symbols.intern("B");
+        let symbols = PartitionedSymbolTable::new();
+        let symbol_input = symbols.intern(0, "input");
+        let symbol_a = symbols.intern(0, "A");
+        let symbol_b = symbols.intern(0, "B");
         let mut graph = DiGraph::new();
         let node_a = graph.add_node(Location::with_name(symbol_a));
         let node_b = graph.add_node(Location::with_name(symbol_b));

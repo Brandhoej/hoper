@@ -54,12 +54,15 @@ pub enum Traversal {
     },
     Stay {
         location: LocationTree,
-    }
+    },
 }
 
 impl Traversal {
     pub const fn step(edge: Edge, location: LocationTree) -> Self {
-        Self::Step { edge, destination: location }
+        Self::Step {
+            edge,
+            destination: location,
+        }
     }
 
     pub const fn stay(location: LocationTree) -> Self {
@@ -75,7 +78,11 @@ impl Traversal {
 
     pub const fn destination(&self) -> &LocationTree {
         match self {
-            Traversal::Step { destination: location, .. } | Traversal::Stay { location } => location,
+            Traversal::Step {
+                destination: location,
+                ..
+            }
+            | Traversal::Stay { location } => location,
         }
     }
 

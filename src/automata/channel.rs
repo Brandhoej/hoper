@@ -44,15 +44,15 @@ impl Channel {
 
 #[cfg(test)]
 mod tests {
-    use symbol_table::SymbolTable;
-
-    use crate::automata::{action::Action, channel::Channel};
+    use crate::automata::{
+        action::Action, channel::Channel, partitioned_symbol_table::PartitionedSymbolTable,
+    };
 
     #[test]
     fn test_is_input_or_output() {
-        let symbols = SymbolTable::new();
-        let a = Action::new(symbols.intern("a"));
-        let b = Action::new(symbols.intern("b"));
+        let symbols = PartitionedSymbolTable::new();
+        let a = Action::new(symbols.intern(0, "a"));
+        let b = Action::new(symbols.intern(0, "b"));
 
         assert_ne!(a, b);
 
@@ -69,9 +69,9 @@ mod tests {
 
     #[test]
     fn test_action() {
-        let symbols = SymbolTable::new();
-        let a = Action::new(symbols.intern("a"));
-        let b = Action::new(symbols.intern("b"));
+        let symbols = PartitionedSymbolTable::new();
+        let a = Action::new(symbols.intern(0, "a"));
+        let b = Action::new(symbols.intern(0, "b"));
 
         assert_ne!(a, b);
 
@@ -81,9 +81,9 @@ mod tests {
 
     #[test]
     fn test_partial_eq() {
-        let symbols = SymbolTable::new();
-        let a = Action::new(symbols.intern("a"));
-        let b = Action::new(symbols.intern("b"));
+        let symbols = PartitionedSymbolTable::new();
+        let a = Action::new(symbols.intern(0, "a"));
+        let b = Action::new(symbols.intern(0, "b"));
 
         assert_ne!(a, b);
 

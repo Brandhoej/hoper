@@ -1,18 +1,17 @@
 use std::fmt::{self, Display};
 
 use itertools::Itertools;
-use symbol_table::Symbol;
 
 use crate::zones::constraint::Limit;
 
-use super::expressions::Expression;
+use super::{expressions::Expression, partitioned_symbol_table::PartitionedSymbol};
 
 #[derive(Clone, Debug)]
 pub enum Statement {
     Sequence(Vec<Statement>),
     Branch(Vec<Statement>),
     Expression(Expression),
-    Reset(Symbol, Limit),
+    Reset(PartitionedSymbol, Limit),
 }
 
 impl Display for Statement {
@@ -54,6 +53,10 @@ impl Statement {
 
     pub const fn express(expression: Expression) -> Self {
         Self::Expression(expression)
+    }
+
+    pub const fn reset(clock: PartitionedSymbol, limit: Limit) -> Self {
+        Self::Reset(clock, limit)
     }
 }
 

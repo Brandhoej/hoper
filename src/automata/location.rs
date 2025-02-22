@@ -1,6 +1,6 @@
-use symbol_table::Symbol;
-
-use super::{expressions::Expression, literal::Literal};
+use super::{
+    expressions::Expression, literal::Literal, partitioned_symbol_table::PartitionedSymbol,
+};
 
 /// Locations represents sources and destinations connecting edges allowing the simulator to make moves.
 #[derive(Clone, Debug)]
@@ -14,14 +14,14 @@ pub enum Location {
     /// scenarious. Instead, if lower-bounds are strictly required then they should (Read must) be
     /// implemented as a part of all edges having the location as a destination instead.
     Leaf {
-        name: Symbol,
+        name: PartitionedSymbol,
         invariant: Expression,
     },
     Branch(Vec<Location>),
 }
 
 impl Location {
-    pub const fn new(name: Symbol, invariant: Expression) -> Self {
+    pub const fn new(name: PartitionedSymbol, invariant: Expression) -> Self {
         Self::Leaf { name, invariant }
     }
 
@@ -29,14 +29,14 @@ impl Location {
         todo!()
     }
 
-    pub fn with_name(name: Symbol) -> Self {
+    pub fn with_name(name: PartitionedSymbol) -> Self {
         Self::new(name, Literal::new_true().into())
     }
 
-    pub const fn name(&self) -> Option<&Symbol> {
+    pub const fn name(&self) -> Option<&PartitionedSymbol> {
         match self {
             Location::Leaf { name, .. } => Some(name),
-            Location::Branch(locations) => None,
+            Location::Branch(..) => None,
         }
     }
 
@@ -50,5 +50,9 @@ impl Location {
                     .collect(),
             ),
         }
+    }
+
+    pub const fn is_leaf(&self) -> bool {
+        matches!(self, Location::Leaf { .. })
     }
 }

@@ -2,11 +2,13 @@ use std::fmt::Display;
 
 use symbol_table::Symbol;
 
+use super::partitioned_symbol_table::PartitionedSymbol;
+
 #[derive(Clone, Debug)]
 pub enum Literal {
     Boolean(bool),
     I16(i16),
-    Identifier(Symbol),
+    Identifier(PartitionedSymbol),
 }
 
 impl Literal {
@@ -26,7 +28,7 @@ impl Literal {
     }
 
     #[inline]
-    pub const fn new_identifier(symbol: Symbol) -> Self {
+    pub const fn new_identifier(symbol: PartitionedSymbol) -> Self {
         Self::Identifier(symbol)
     }
 
@@ -44,7 +46,7 @@ impl Literal {
     }
 
     #[inline]
-    pub const fn identifier(&self) -> Option<Symbol> {
+    pub const fn identifier(&self) -> Option<PartitionedSymbol> {
         if let Self::Identifier(ident) = self {
             return Some(*ident);
         }
@@ -63,6 +65,18 @@ impl Literal {
 impl From<bool> for Literal {
     fn from(value: bool) -> Self {
         Self::new_boolean(value)
+    }
+}
+
+impl From<PartitionedSymbol> for Literal {
+    fn from(value: PartitionedSymbol) -> Self {
+        Self::new_identifier(value)
+    }
+}
+
+impl From<i16> for Literal {
+    fn from(value: i16) -> Self {
+        Self::new_i16(value)
     }
 }
 

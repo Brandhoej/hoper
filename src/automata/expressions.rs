@@ -1,6 +1,8 @@
 use std::fmt::{self, Display};
 
-use super::literal::Literal;
+use symbol_table::Symbol;
+
+use super::{literal::Literal, partitioned_symbol_table::PartitionedSymbol};
 
 #[derive(Clone, Debug)]
 pub enum Binary {
@@ -126,6 +128,18 @@ impl Expression {
 impl From<Literal> for Expression {
     fn from(literal: Literal) -> Self {
         Self::Literal(literal)
+    }
+}
+
+impl From<PartitionedSymbol> for Expression {
+    fn from(value: PartitionedSymbol) -> Self {
+        Expression::Literal(value.into())
+    }
+}
+
+impl From<i16> for Expression {
+    fn from(value: i16) -> Self {
+        Self::Literal(value.into())
     }
 }
 

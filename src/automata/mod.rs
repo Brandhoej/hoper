@@ -16,6 +16,7 @@ pub mod interpreter;
 pub mod ioa;
 pub mod literal;
 pub mod location;
+pub mod partitioned_symbol_table;
 pub mod refinement;
 pub mod specification;
 pub mod state_set;
