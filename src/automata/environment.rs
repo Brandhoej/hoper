@@ -1,6 +1,5 @@
 use std::collections::{hash_map::Entry, HashMap};
 
-use symbol_table::Symbol;
 
 use crate::zones::constraint::Clock;
 

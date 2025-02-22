@@ -191,7 +191,7 @@ mod tests {
     use std::collections::HashSet;
 
     use petgraph::graph::DiGraph;
-    use symbol_table::SymbolTable;
+    
 
     use crate::automata::{
         action::Action,

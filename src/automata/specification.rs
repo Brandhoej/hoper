@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 
-use symbol_table::Symbol;
 
 use crate::zones::constraint::Clock;
 
@@ -75,7 +74,7 @@ mod tests {
     use std::collections::HashSet;
 
     use petgraph::graph::DiGraph;
-    use symbol_table::SymbolTable;
+    
 
     use crate::automata::{
         action::Action, automaton::Automaton, edge::Edge, input_enabled::InputEnabled,

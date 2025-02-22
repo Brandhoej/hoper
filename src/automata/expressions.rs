@@ -1,6 +1,5 @@
 use std::fmt::{self, Display};
 
-use symbol_table::Symbol;
 
 use super::{literal::Literal, partitioned_symbol_table::PartitionedSymbol};
 

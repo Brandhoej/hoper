@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 
-use symbol_table::Symbol;
 
 use crate::{
     sets::{are_disjoint, intersection, skip_nth, subtract, union},
@@ -9,7 +8,6 @@ use crate::{
 
 use super::{
     action::Action,
-    edge::Edge,
     ioa::IOA,
     location::Location,
     partitioned_symbol_table::PartitionedSymbol,
