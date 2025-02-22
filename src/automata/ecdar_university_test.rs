@@ -1,7 +1,6 @@
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
-    use symbol_table::SymbolTable;
 
     use crate::automata::{
         automaton::Automaton,
