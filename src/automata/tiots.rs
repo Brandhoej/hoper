@@ -1,3 +1,5 @@
+use dyn_clone::DynClone;
+
 use crate::{
     automata::extrapolator::Extrapolator,
     zones::{
@@ -191,7 +193,6 @@ mod tests {
     use std::collections::HashSet;
 
     use petgraph::graph::DiGraph;
-    
 
     use crate::automata::{
         action::Action,

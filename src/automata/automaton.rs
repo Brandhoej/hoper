@@ -1,9 +1,11 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use petgraph::{
+    dot::{Config, Dot},
     graph::{DiGraph, EdgeIndex, EdgeReference, NodeIndex},
-    visit::EdgeRef,
+    visit::{EdgeRef, IntoEdgeReferences},
     Direction::{Incoming, Outgoing},
+    Graph,
 };
 
 use crate::zones::constraint::Clock;
@@ -11,10 +13,10 @@ use crate::zones::constraint::Clock;
 use super::{
     action::Action,
     channel::Channel,
-    edge::Edge,
+    edge::{ContextualEdge, Edge},
     ioa::IOA,
-    location::Location,
-    partitioned_symbol_table::PartitionedSymbol,
+    location::{ContextualLocation, Location},
+    partitioned_symbol_table::{PartitionedSymbol, PartitionedSymbolTable},
     ta::TA,
     tioa::{LocationTree, Traversal, TIOA},
 };
@@ -96,6 +98,10 @@ impl Automaton {
         edges: T,
     ) -> impl Iterator<Item = &'a Edge> + use<'a, T> {
         edges.map(|edge| edge.weight())
+    }
+
+    pub fn all_edges(&self) -> impl Iterator<Item = EdgeReference<Edge>> {
+        self.graph.edge_references()
     }
 
     pub fn ingoing(&self, node: NodeIndex) -> impl Iterator<Item = EdgeReference<Edge>> {
@@ -192,6 +198,13 @@ impl Automaton {
     ) -> EdgeIndex {
         self.graph.add_edge(source, destination, edge)
     }
+
+    pub fn in_context<'a>(
+        &'a self,
+        symbols: &'a PartitionedSymbolTable,
+    ) -> ContextualAutomaton<'a> {
+        ContextualAutomaton::new(symbols, self)
+    }
 }
 
 impl TA for Automaton {
@@ -242,6 +255,84 @@ impl TIOA for Automaton {
         }
 
         Err(())
+    }
+}
+
+pub trait IntoAutomaton {
+    fn into_automaton(self) -> Result<Automaton, ()>;
+}
+
+impl<T: TIOA> IntoAutomaton for T {
+    fn into_automaton(self) -> Result<Automaton, ()> {
+        let mut graph: Graph<Location, Edge> = DiGraph::new();
+        let mut mapping: HashMap<LocationTree, NodeIndex> = HashMap::new();
+        let mut visited: HashSet<LocationTree> = HashSet::new();
+        let mut trees: VecDeque<LocationTree> = VecDeque::new();
+
+        trees.push_back(self.initial_location());
+
+        while let Some(source_tree) = trees.pop_front() {
+            if !visited.insert(source_tree.clone()) {
+                continue;
+            }
+
+            let from = self.location(&source_tree).unwrap();
+
+            let source = *mapping
+                .entry(source_tree.clone())
+                .or_insert_with(|| graph.add_node(from));
+
+            for action in self.actions() {
+                let traversals = self.outgoing_traversals(&source_tree, action).unwrap();
+                for traversal in traversals {
+                    let destination_tree = traversal.destination().clone();
+                    let to = self.location(&destination_tree).unwrap();
+                    let destination = *mapping
+                        .entry(destination_tree.clone())
+                        .or_insert_with(|| graph.add_node(to));
+                    graph.add_edge(source, destination, traversal.edge().unwrap().clone());
+                    trees.push_back(destination_tree);
+                }
+            }
+        }
+
+        let initial = *mapping.get(&self.initial_location()).unwrap();
+
+        Automaton::new(initial, graph, self.clocks())
+    }
+}
+
+pub struct ContextualAutomaton<'a> {
+    symbols: &'a PartitionedSymbolTable,
+    automaton: &'a Automaton,
+}
+
+impl<'a> ContextualAutomaton<'a> {
+    pub const fn new(symbols: &'a PartitionedSymbolTable, automaton: &'a Automaton) -> Self {
+        Self { symbols, automaton }
+    }
+
+    pub fn graph(&self) -> Graph<ContextualLocation<'a>, ContextualEdge<'a>> {
+        let mut graph = Graph::<ContextualLocation<'a>, ContextualEdge<'a>>::default();
+        let mut node_map: HashMap<NodeIndex, NodeIndex> = HashMap::new();
+
+        // Convert nodes.
+        for old_node in self.automaton.node_iter() {
+            let location = self.automaton.location(old_node).unwrap();
+            let contextual_location = location.in_context(&self.symbols);
+            let new_node = graph.add_node(contextual_location);
+            node_map.insert(old_node, new_node);
+        }
+
+        // Convert edges.
+        for edge in self.automaton.all_edges() {
+            let source_new = node_map[&edge.source()];
+            let target_new = node_map[&edge.target()];
+            let contextual_edge = edge.weight().in_context(&self.symbols);
+            graph.add_edge(source_new, target_new, contextual_edge);
+        }
+
+        graph
     }
 }
 

@@ -1,5 +1,11 @@
+use std::fmt::{self, Display, Formatter};
+
+use itertools::Itertools;
+
 use super::{
-    expressions::Expression, literal::Literal, partitioned_symbol_table::PartitionedSymbol,
+    expressions::Expression,
+    literal::Literal,
+    partitioned_symbol_table::{PartitionedSymbol, PartitionedSymbolTable},
 };
 
 /// Locations represents sources and destinations connecting edges allowing the simulator to make moves.
@@ -26,7 +32,7 @@ impl Location {
     }
 
     pub fn combine(locations: impl Iterator<Item = Self>) -> Self {
-        todo!()
+        Self::Branch(locations.collect())
     }
 
     pub fn with_name(name: PartitionedSymbol) -> Self {
@@ -43,7 +49,7 @@ impl Location {
     pub fn invariant(&self) -> Expression {
         match self {
             Location::Leaf { invariant, .. } => invariant.clone(),
-            Location::Branch(locations) => Expression::conjunction(
+            Location::Branch(locations) => Expression::conjunctions(
                 locations
                     .iter()
                     .map(|location| location.invariant().clone())
@@ -54,5 +60,60 @@ impl Location {
 
     pub const fn is_leaf(&self) -> bool {
         matches!(self, Location::Leaf { .. })
+    }
+
+    pub fn in_context<'a>(&'a self, symbols: &'a PartitionedSymbolTable) -> ContextualLocation<'a> {
+        ContextualLocation::new(symbols, self)
+    }
+}
+
+impl Display for Location {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Location::Leaf { name, invariant } => write!(f, "[{}, {}]", name, invariant),
+            Location::Branch(locations) => {
+                if locations.is_empty() {
+                    return write!(f, "()");
+                }
+
+                let join = locations.iter().map(ToString::to_string).join(",");
+                write!(f, "({})", join)
+            }
+        }
+    }
+}
+
+pub struct ContextualLocation<'a> {
+    symbols: &'a PartitionedSymbolTable,
+    location: &'a Location,
+}
+
+impl<'a> ContextualLocation<'a> {
+    pub const fn new(symbols: &'a PartitionedSymbolTable, location: &'a Location) -> Self {
+        Self { symbols, location }
+    }
+}
+
+impl<'a> Display for ContextualLocation<'a> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self.location {
+            Location::Leaf { name, invariant } => write!(
+                f,
+                "[{}, {}]",
+                self.symbols.resolve(name),
+                invariant.in_context(self.symbols)
+            ),
+            Location::Branch(locations) => {
+                if locations.is_empty() {
+                    return write!(f, "()");
+                }
+
+                let join = locations
+                    .iter()
+                    .map(|location| location.in_context(&self.symbols).to_string())
+                    .join(",");
+                write!(f, "({})", join)
+            }
+        }
     }
 }

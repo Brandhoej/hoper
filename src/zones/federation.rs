@@ -41,7 +41,7 @@ impl Federation {
     }
 
     #[inline]
-    pub fn clocks(&self) -> Option<Clock> {
+    pub fn dimensions(&self) -> Option<Clock> {
         match self.dbms.first() {
             Some(dbm) => Some(dbm.dimensions()),
             None => None,
@@ -60,8 +60,8 @@ impl Federation {
 
     #[inline]
     pub fn append(&mut self, dbm: DBM<Canonical>) {
-        if let Some(clocks) = self.clocks() {
-            if clocks == dbm.dimensions() {
+        if let Some(dimensions) = self.dimensions() {
+            if dimensions != dbm.dimensions() {
                 panic!("inconsistent clocks in federation and dbm");
             }
         }
@@ -232,10 +232,10 @@ impl Federation {
         let mut i = 0;
         while i < self.len() {
             let (subset, superset) = self.dbms[i].relation(&other);
-            if subset || (subset && superset) {
+            if subset {
                 // The self dbm is a subset or equal to the other.
                 self.dbms.swap_remove(i);
-            } else if superset {
+            } else if superset || (subset && superset) {
                 // The self dbm is a superset of the other.
                 included = true;
                 i += 1
@@ -248,11 +248,11 @@ impl Federation {
     }
 
     pub fn union(&mut self, other: Self) {
-        if self.is_empty() {
+        if other.is_empty() {
             return;
         }
 
-        if self.clocks() != other.clocks() {
+        if !self.is_empty() && self.dimensions() != other.dimensions() {
             panic!("inconsistent clocks between federations")
         }
 
@@ -287,7 +287,7 @@ impl Federation {
     }
 
     pub fn subtract(self, minued: &DBM<Canonical>) -> Self {
-        if let Some(clocks) = self.clocks() {
+        if let Some(clocks) = self.dimensions() {
             if clocks != minued.dimensions() {
                 panic!("inconsistent number of clocks in federation and DBM")
             }
@@ -330,7 +330,7 @@ impl Federation {
     }
 
     pub fn inverse(self) -> Self {
-        Self::universe(self.clocks().unwrap()).subtraction(&self)
+        Self::universe(self.dimensions().unwrap()).subtraction(&self)
     }
 }
 

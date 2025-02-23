@@ -1,4 +1,3 @@
-
 use super::{expressions::Expression, literal::Literal, statements::Statement, tiots::State};
 
 pub struct Interpreter {
@@ -21,6 +20,7 @@ impl Interpreter {
                 state
             }
             Statement::Branch(branches) => {
+                // TODO: This can be parallelised with rayon.
                 for branch in branches.into_iter() {
                     state = self.statement(state, branch)
                 }

@@ -1,4 +1,9 @@
-use super::{action::Action, channel::Channel, expressions::Expression, statements::Statement};
+use std::fmt::{self, Display, Formatter};
+
+use super::{
+    action::Action, channel::Channel, expressions::Expression,
+    partitioned_symbol_table::PartitionedSymbolTable, statements::Statement,
+};
 
 /// Represents a symbolic transition for an automaton. Intuitively this means that an edge
 /// represents a set of transitions. The edge is either an input or output depending on
@@ -42,16 +47,9 @@ impl Edge {
 
     /// Creates a conjoined edge from all the edges where the guard is a conjunction and the updates
     /// are a parallel construction of all edge updates.
-    pub fn conjoin(edges: Vec<Self>) -> Result<Self, ()> {
+    pub fn conjoin(channel: Channel, edges: Vec<Self>) -> Result<Self, ()> {
         // We cannot conjoin zero edges together.
         if edges.is_empty() {
-            return Err(());
-        }
-
-        // All edges must match the same channel.
-        // We cannot conjoin inputs/outputs and different letters.
-        let channel = edges[0].channel.clone();
-        if !edges.iter().all(|edge| edge.channel == channel) {
             return Err(());
         }
 
@@ -69,7 +67,7 @@ impl Edge {
         // Updates are by definition disjoint meaning that computing them in any order will produce the same new state.
         // For this reason we wrap the updates in a branch which communicates that is can be computed in parallel.
         // However, by definition, the updates can be any sequence combining exactly all the updates once in some way.
-        let guard = Expression::conjunction(guards);
+        let guard = Expression::conjunctions(guards);
         let update = Statement::branch(updates);
 
         Ok(Self::new(channel, guard, update))
@@ -103,5 +101,38 @@ impl Edge {
     /// Returns the update of the edge.
     pub const fn update(&self) -> &Statement {
         &self.update
+    }
+
+    pub fn in_context<'a>(&'a self, symbols: &'a PartitionedSymbolTable) -> ContextualEdge<'a> {
+        ContextualEdge::new(symbols, self)
+    }
+}
+
+impl Display for Edge {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "[{} {} {}]", self.guard(), self.action(), self.update())
+    }
+}
+
+pub struct ContextualEdge<'a> {
+    symbols: &'a PartitionedSymbolTable,
+    edge: &'a Edge,
+}
+
+impl<'a> ContextualEdge<'a> {
+    pub const fn new(symbols: &'a PartitionedSymbolTable, edge: &'a Edge) -> Self {
+        Self { symbols, edge }
+    }
+}
+
+impl<'a> Display for ContextualEdge<'a> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}\n{}\n{}",
+            self.edge.guard().in_context(self.symbols),
+            self.edge.channel().in_context(self.symbols),
+            self.edge.update().in_context(self.symbols)
+        )
     }
 }

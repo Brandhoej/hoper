@@ -13,15 +13,15 @@ use super::{
     statements::Statement,
 };
 
-pub struct AutomatonBuilder {
+pub struct AutomatonBuilder<'a> {
     initial: Option<NodeIndex>,
-    symbols: PartitionedSymbolTable,
+    symbols: &'a mut PartitionedSymbolTable,
     graph: DiGraph<Location, Edge>,
     clocks: HashSet<PartitionedSymbol>,
 }
 
-impl AutomatonBuilder {
-    pub fn new(symbols: PartitionedSymbolTable) -> Self {
+impl<'a> AutomatonBuilder<'a> {
+    pub fn new(symbols: &'a mut PartitionedSymbolTable) -> Self {
         Self {
             initial: None,
             symbols: symbols,

@@ -1,6 +1,9 @@
-use std::num::{NonZeroU32, NonZeroU64};
+use std::{
+    fmt::Display,
+    num::{NonZeroU32, NonZeroU64},
+};
 
-use dashmap::DashMap;
+use dashmap::{DashMap, Entry};
 use symbol_table::SymbolTable;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -17,6 +20,12 @@ impl PartitionedSymbol {
 
     pub const fn symbol(&self) -> NonZeroU32 {
         NonZeroU32::new((self.0.get() & 0xFFFF_FFFF) as u32).unwrap()
+    }
+}
+
+impl Display for PartitionedSymbol {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 
@@ -40,7 +49,7 @@ impl PartitionedSymbolTable {
         PartitionedSymbol::new(partition, symbol.into())
     }
 
-    pub fn resolve(&self, ps: PartitionedSymbol) -> &str {
+    pub fn resolve(&self, ps: &PartitionedSymbol) -> &str {
         let binding = self
             .tables
             .get(&ps.partition())
@@ -62,8 +71,8 @@ mod tests {
         let sym1 = table.intern(1, "hello");
         let sym2 = table.intern(1, "world");
 
-        assert_eq!(table.resolve(sym1), "hello");
-        assert_eq!(table.resolve(sym2), "world");
+        assert_eq!(table.resolve(&sym1), "hello");
+        assert_eq!(table.resolve(&sym2), "world");
     }
 
     #[test]
@@ -73,7 +82,7 @@ mod tests {
         let sym2 = table.intern(42, "foo");
 
         assert_eq!(sym1, sym2);
-        assert_eq!(table.resolve(sym1), "foo");
+        assert_eq!(table.resolve(&sym1), "foo");
     }
 
     #[test]
@@ -83,8 +92,8 @@ mod tests {
         let sym2 = table.intern(2, "foo");
 
         assert_ne!(sym1, sym2);
-        assert_eq!(table.resolve(sym1), "foo");
-        assert_eq!(table.resolve(sym2), "foo");
+        assert_eq!(table.resolve(&sym1), "foo");
+        assert_eq!(table.resolve(&sym2), "foo");
     }
 
     #[test]
@@ -104,7 +113,7 @@ mod tests {
             let table = Arc::clone(&table);
             handles.push(thread::spawn(move || {
                 let sym = table.intern(partition, "concurrent");
-                (partition, table.resolve(sym).to_string(), sym)
+                (partition, table.resolve(&sym).to_string(), sym)
             }));
         }
 

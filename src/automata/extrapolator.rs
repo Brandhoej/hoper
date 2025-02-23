@@ -34,6 +34,7 @@ pub struct Extrapolator {
     stack: Vec<Literal>,
 }
 
+// TODO: FIX EXtrapolator which does not handle mix of boolean logic and tightning/loosning of zones.
 impl Extrapolator {
     pub fn new() -> Self {
         Self { stack: Vec::new() }
@@ -64,6 +65,10 @@ impl Extrapolator {
                     }
 
                     let rhs_bounds = self.bounds(bounds, state, rhs);
+                    if self.stack.is_empty() {
+                        let str = rhs.to_string();
+                        println!("{}", str);
+                    }
                     let rhs_bool = self.stack.pop().unwrap().boolean().unwrap();
 
                     if !rhs_bool {
@@ -107,6 +112,9 @@ impl Extrapolator {
                 self.bounds(bounds.clone(), state, &limit);
                 let limit_literal = self.stack.pop().unwrap().i16().unwrap();
 
+                // Q: Always push true or only sometimes?
+                self.stack.push(Literal::new_true());
+
                 match comparison {
                     Comparison::LessThanOrEqual => {
                         bounds.tighten_upper(clock, Relation::weak(limit_literal))
@@ -140,6 +148,9 @@ impl Extrapolator {
 
                 self.bounds(bounds.clone(), state, &limit);
                 let limit_literal = self.stack.pop().unwrap().i16().unwrap();
+
+                // Q: Always push true or only sometimes?
+                self.stack.push(Literal::new_true());
 
                 match comparison {
                     Comparison::LessThanOrEqual => bounds.tighten(

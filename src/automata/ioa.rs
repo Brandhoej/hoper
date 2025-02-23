@@ -1,8 +1,10 @@
 use std::collections::HashSet;
 
+use dyn_clone::DynClone;
+
 use super::action::Action;
 
-pub trait IOA {
+pub trait IOA: DynClone {
     fn inputs(&self) -> HashSet<Action>;
     fn outputs(&self) -> HashSet<Action>;
     fn actions(&self) -> HashSet<Action> {
@@ -11,3 +13,5 @@ pub trait IOA {
         actions
     }
 }
+
+dyn_clone::clone_trait_object!(IOA);

@@ -144,6 +144,16 @@ impl<State: DBMState> DBM<State> {
         }
     }
 
+    pub fn delay_to(&mut self, relation: Relation) {
+        if relation.is_infinity() {
+            self.up();
+        } else if !relation.is_zero() {
+            for clock in REFERENCE + 1..self.dimensions() {
+                self.set_upper(clock, self.lower(clock) + relation);
+            }
+        }
+    }
+
     /// The up operation computes the strongest postcondition of a zone with respect to delay.
     /// Afterwards the DBM contains the clock assignments that can be reached from by delay.
     /// up(D) = {u + d | u ∈ D, d ∈ ℝ+}.
@@ -1028,7 +1038,7 @@ mod tests {
         bounds::Bounds,
         constraint::{
             Relation, RelationsSample, Strictness, UniformRelations, INFINITY, REFERENCE, ZERO,
-        },
+        }, federation::Federation,
     };
 
     use super::{Canonical, Dirty, DBM};
@@ -1619,5 +1629,65 @@ mod tests {
 
         dbm2 = dbm2.dirty().close().ok().unwrap();
         assert_eq!("-x < -3 ∧ x < 5", dbm2.fmt_conjunctions(&vec!["x"]));
+    }
+
+    #[test]
+    fn empty_subtraction() {
+        let federation_1234 = Federation::new(vec![dbm1(), dbm2(), dbm3(), dbm4()]);
+        assert!(federation_1234.includes(&federation_1234));
+        assert!(federation_1234.includes_dbm(&dbm1()));
+        assert!(federation_1234.includes_dbm(&dbm2()));
+        assert!(federation_1234.includes_dbm(&dbm3()));
+        assert!(federation_1234.includes_dbm(&dbm4()));
+        assert!(federation_1234.clone().subtraction(&federation_1234).is_empty());
+        
+        let federation_123 = Federation::new(vec![dbm1(), dbm2(), dbm3()]);
+        assert!(federation_123.includes(&federation_123));
+        assert!(federation_123.includes_dbm(&dbm1()));
+        assert!(federation_123.includes_dbm(&dbm2()));
+        assert!(federation_123.includes_dbm(&dbm3()));
+        assert!(federation_123.includes_dbm(&dbm4()));
+        assert!(federation_123.clone().subtraction(&federation_123).is_empty());
+        assert!(federation_123.clone().subtraction(&federation_1234).is_empty());
+
+        let federation_12 = Federation::new(vec![dbm1(), dbm2()]);
+        assert!(federation_12.includes(&federation_12));
+        assert!(federation_12.includes_dbm(&dbm1()));
+        assert!(federation_12.includes_dbm(&dbm2()));
+        assert!(!federation_12.includes_dbm(&dbm3()));
+        assert!(!federation_12.includes_dbm(&dbm4()));
+        assert!(federation_12.clone().subtraction(&federation_12).is_empty());
+        assert!(federation_12.clone().subtraction(&federation_123).is_empty());
+        assert!(federation_12.clone().subtraction(&federation_1234).is_empty());
+
+        let federation_1 = Federation::new(vec![dbm1()]);
+        assert!(federation_1.includes(&federation_1));
+        assert!(federation_1.includes_dbm(&dbm1()));
+        assert!(federation_1.includes_dbm(&dbm2()));
+        assert!(federation_1.includes_dbm(&dbm3()));
+        assert!(!federation_1.includes_dbm(&dbm4()));
+        assert!(federation_1.clone().subtraction(&federation_1).is_empty());
+        assert!(federation_1.clone().subtraction(&federation_12).is_empty());
+        assert!(federation_1.clone().subtraction(&federation_123).is_empty());
+        assert!(federation_1.clone().subtraction(&federation_1234).is_empty());
+
+        let mut incremental_federation = Federation::new(vec![]);
+        incremental_federation.append(dbm1());
+        assert!(incremental_federation.includes_dbm(&dbm1()));
+        incremental_federation.append(dbm2());
+        assert!(incremental_federation.includes_dbm(&dbm2()));
+        incremental_federation.append(dbm3());
+        assert!(incremental_federation.includes_dbm(&dbm3()));
+        incremental_federation.append(dbm4());
+        assert!(incremental_federation.includes_dbm(&dbm4()));
+        
+        incremental_federation = incremental_federation.subtract(&dbm1());
+        assert!(!incremental_federation.includes_dbm(&dbm1()));
+        incremental_federation = incremental_federation.subtract(&dbm2());
+        assert!(!incremental_federation.includes_dbm(&dbm2()));
+        incremental_federation = incremental_federation.subtract(&dbm3());
+        assert!(!incremental_federation.includes_dbm(&dbm3()));
+        incremental_federation = incremental_federation.subtract(&dbm4());
+        assert!(!incremental_federation.includes_dbm(&dbm4()));
     }
 }

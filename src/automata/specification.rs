@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 
-
 use crate::zones::constraint::Clock;
 
 use super::{
@@ -23,6 +22,7 @@ use super::{
 /// but it might be unpredictable how the system behaves after
 /// receiving it. Input-enabledness enforces explicit handling
 /// of all inputs at all times.
+#[derive(Clone)]
 pub struct Specification(Box<dyn TIOA>);
 
 impl Specification {
@@ -74,7 +74,6 @@ mod tests {
     use std::collections::HashSet;
 
     use petgraph::graph::DiGraph;
-    
 
     use crate::automata::{
         action::Action, automaton::Automaton, edge::Edge, input_enabled::InputEnabled,

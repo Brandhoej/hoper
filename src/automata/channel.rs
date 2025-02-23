@@ -1,4 +1,6 @@
-use super::action::Action;
+use std::fmt::{self, Display};
+
+use super::{action::Action, partitioned_symbol_table::PartitionedSymbolTable};
 
 /// A channel is used to describe the interface of an automaton in regards to
 /// how the actions (or letters) are used to communicate from or to the automaton.
@@ -39,6 +41,30 @@ impl Channel {
     /// Returns true if the channel is an output.
     pub const fn is_output(&self) -> bool {
         matches!(self, Channel::Out(_))
+    }
+
+    pub fn in_context<'a>(&'a self, symbols: &'a PartitionedSymbolTable) -> ContextualChannel<'a> {
+        ContextualChannel::new(symbols, self)
+    }
+}
+
+pub struct ContextualChannel<'a> {
+    symbols: &'a PartitionedSymbolTable,
+    channel: &'a Channel,
+}
+
+impl<'a> ContextualChannel<'a> {
+    pub const fn new(symbols: &'a PartitionedSymbolTable, channel: &'a Channel) -> Self {
+        Self { symbols, channel }
+    }
+}
+
+impl<'a> Display for ContextualChannel<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.channel {
+            Channel::In(action) => write!(f, "{}?", self.symbols.resolve(action.letter())),
+            Channel::Out(action) => write!(f, "{}!", self.symbols.resolve(action.letter())),
+        }
     }
 }
 

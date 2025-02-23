@@ -1,4 +1,9 @@
-use super::partitioned_symbol_table::PartitionedSymbol;
+use std::fmt::{self, Display};
+
+use super::{
+    expressions::Expression,
+    partitioned_symbol_table::{PartitionedSymbol, PartitionedSymbolTable},
+};
 
 /// An action is a letter from an alphabet of all actions.
 /// Inherently these are not partitioned in input/outputs instead
@@ -18,6 +23,33 @@ impl Action {
     // Returns the letter of the action which uniquely differentiates it.
     pub const fn letter(&self) -> &PartitionedSymbol {
         &self.letter
+    }
+
+    pub fn in_context<'a>(&'a self, symbols: &'a PartitionedSymbolTable) -> ContextualAction<'a> {
+        ContextualAction::new(symbols, self)
+    }
+}
+
+impl Display for Action {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.letter)
+    }
+}
+
+pub struct ContextualAction<'a> {
+    symbols: &'a PartitionedSymbolTable,
+    action: &'a Action,
+}
+
+impl<'a> ContextualAction<'a> {
+    pub const fn new(symbols: &'a PartitionedSymbolTable, action: &'a Action) -> Self {
+        Self { symbols, action }
+    }
+}
+
+impl<'a> Display for ContextualAction<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.symbols.resolve(self.action.letter()))
     }
 }
 

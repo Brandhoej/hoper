@@ -11,7 +11,6 @@ pub struct Interval {
 impl Interval {
     pub fn new(lower: Relation, upper: Relation) -> Self {
         if lower > upper {
-            println!("{}", Self { lower, upper });
             panic!();
         }
         Self { lower, upper }

@@ -39,10 +39,9 @@ impl RefinementStatePair {
         // The specification is more loose and has delayed more than the implementation.
         // The delays should be synchronised and therefore, the specificaiton has to be un-delayed.
         if specification_interval.included() > implementation_interval.included() {
-            let difference = specification_interval
-                .included()
-                .difference(implementation_interval.included());
-            specification.mut_zone().delay(difference.negate_limit());
+            specification
+                .mut_zone()
+                .delay_to(implementation_interval.included());
         }
 
         Ok(RefinementStatePair::new(implementation, specification))
@@ -95,7 +94,7 @@ impl Refinement {
         }
 
         // Actᵀₒ ⊆ Actᔆₒ
-        if !specification.inputs().is_subset(&implementation.inputs()) {
+        if !specification.outputs().is_subset(&implementation.outputs()) {
             return Err(());
         }
 
@@ -174,6 +173,9 @@ impl Refinement {
         };
 
         while let Some(pair) = worklist.pop_front() {
+            let len = worklist.len();
+            println!("{}", len);
+
             let mut products: Vec<
                 Box<dyn Iterator<Item = ((State, Traversal), (State, Traversal))>>,
             > = Vec::with_capacity(4);
@@ -213,8 +215,10 @@ impl Refinement {
                 // Because of this of this, they would all in all states be able to react to all inputs.
                 assert!(specification_states.peek().is_some());
 
-                // let implementation_states = vec![pair.implementation().clone()];
-                let implementation_states = vec![];
+                let implementation_states = vec![(
+                    pair.implementation().clone(),
+                    Traversal::stay(pair.implementation().location().clone()),
+                )];
 
                 products.push(Box::new(
                     implementation_states
@@ -224,7 +228,7 @@ impl Refinement {
             }
 
             // Rule 3 (Common outputs): Both the specification and implementaion can produce the output.
-            // Whenever s -o!->ᔆ s' for some s' ∈ Qᔆ and o! ∈ Actᵀₒ ∩ Actᔆₒ , then t -o!->ᵀ t' and (s', t') ∈ R for some t' ∈ Qᵀ
+            // Whenever s -o!->ᔆ s' for some s' ∈ Qᔆ and o! ∈ Actᵀₒ ∩ Actᔆₒ then t -o!->ᵀ t' and (s', t') ∈ R for some t' ∈ Qᵀ
             for output in self.common_outputs.iter() {
                 let mut implementation_states = self
                     .implementation
@@ -243,7 +247,7 @@ impl Refinement {
                     .traversals(pair.specification(), output)
                     .peekable();
 
-                // The specification could not prduce the outptu the implementation could.
+                // The specification could not produce the output the implementation could.
                 if specification_states.peek().is_none() {
                     return false;
                 }
@@ -265,16 +269,20 @@ impl Refinement {
                     continue;
                 }
 
-                // let specification_states = vec![pair.specification().clone()];
-                let specification_states = vec![];
+                let specification_states = vec![(
+                    pair.specification().clone(),
+                    Traversal::stay(pair.specification().location().clone()),
+                )];
 
                 products.push(Box::new(
-                    implementation_states.cartesian_product(specification_states),
+                    implementation_states
+                        .into_iter()
+                        .cartesian_product(specification_states),
                 ))
             }
 
             let original_implementation_interval = pair.implementation.ref_zone().interval();
-            let original_specification_interval = pair.implementation.ref_zone().interval();
+            let original_specification_interval = pair.specification.ref_zone().interval();
 
             for product in products {
                 for (

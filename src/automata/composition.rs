@@ -1,13 +1,10 @@
 use std::collections::HashSet;
 
-
-use crate::{
-    sets::{are_disjoint, intersection, skip_nth, subtract, union},
-    zones::constraint::Clock,
-};
+use crate::zones::constraint::Clock;
 
 use super::{
     action::Action,
+    channel::Channel,
     ioa::IOA,
     location::Location,
     partitioned_symbol_table::PartitionedSymbol,
@@ -52,76 +49,82 @@ use super::{
 /// while respecting their synchronization and interaction constraints, ensuring correct coordination of both systems.
 ///
 /// Parallel composition over multiple automata can be extended similarly, as `Aⁱ = (((A¹ ∥ A²) ∥ A³) ...)`.
+#[derive(Clone)]
 pub struct Composition {
-    specifications: Vec<Box<Specification>>,
+    lhs: Box<Specification>,
+    rhs: Box<Specification>,
     inputs: HashSet<Action>,
     outputs: HashSet<Action>,
     clocks: HashSet<PartitionedSymbol>,
-    unique_actions: Vec<HashSet<Action>>,
     common_actions: HashSet<Action>,
+    lhs_unique_actions: HashSet<Action>,
+    rhs_unique_actions: HashSet<Action>,
 }
 
 impl Composition {
-    pub fn new(tioas: Vec<Box<Specification>>) -> Result<Self, ()> {
-        if tioas.len() < 2 {
-            return Err(());
-        }
-
-        let all_outputs = tioas.iter().map(|tioa| tioa.outputs());
-        let all_inputs = tioas.iter().map(|tioa| tioa.inputs());
-        let all_actions = tioas.iter().map(|tioa| tioa.actions());
-        let all_clocks = tioas.iter().map(|tioa| tioa.clocks());
-
+    pub fn new(lhs: Box<Specification>, rhs: Box<Specification>) -> Result<Self, ()> {
         // For `Clk₁ ⊎ Clk₂` to hold then they must be disjoint.
-        if !are_disjoint(&all_clocks) {
+        if !lhs.clocks().is_disjoint(&rhs.clocks()) {
             return Err(());
         }
 
         // `Act¹ₒ ∩ Act²ₒ = ∅`
-        if !are_disjoint(&all_outputs) {
+        if !lhs.outputs().is_disjoint(&rhs.outputs()) {
             return Err(());
         }
 
         // `Actₒ = Act¹ₒ ∪ Act²ₒ`
-        let outputs = union(all_outputs.clone()).collect();
+        let outputs: HashSet<_> = lhs.outputs().union(&rhs.outputs()).cloned().collect();
 
         // `Actᵢ = (Act¹ᵢ \ Act²ₒ) ∪ (Act²ᵢ \ Act¹ₒ)`
-        let inputs = union(
-            all_inputs
-                .clone()
-                .map(|inputs| subtract(inputs, &outputs))
-                .map(HashSet::from_iter),
-        )
-        .collect();
-
-        // `Act¹ \ Act²` and `Act² \ Act¹`
-        let unique_actions = all_actions
-            .clone()
-            .enumerate()
-            .map(|(i, actions)| {
-                let exclusive_union = union(skip_nth(all_actions.clone(), i)).collect();
-                subtract(actions, &exclusive_union).collect()
-            })
+        let inputs = lhs
+            .inputs()
+            .difference(&rhs.outputs())
+            .cloned()
+            .collect::<HashSet<Action>>()
+            .union(
+                &rhs.inputs()
+                    .difference(&lhs.outputs())
+                    .cloned()
+                    .collect::<HashSet<Action>>(),
+            )
+            .cloned()
             .collect();
 
+        // `Act¹ \ Act²` and `Act² \ Act¹`
+        let lhs_unique_actions = lhs.actions().difference(&rhs.actions()).cloned().collect();
+        let rhs_unique_actions = rhs.actions().difference(&lhs.actions()).cloned().collect();
+
         // `a ∈ Act¹ ∩ Act²`
-        let common_actions = intersection(all_actions).collect();
+        let common_actions = lhs
+            .actions()
+            .intersection(&rhs.actions())
+            .cloned()
+            .collect();
 
         // `Clk₁ ⊎ Clk₂`
-        let clocks = union(all_clocks).collect();
+        let clocks = lhs.clocks().union(&rhs.clocks()).cloned().collect();
 
         Ok(Self {
-            specifications: tioas,
+            lhs,
+            rhs,
             inputs,
             outputs,
             clocks,
-            unique_actions,
             common_actions,
+            lhs_unique_actions,
+            rhs_unique_actions,
         })
     }
 
-    pub fn size(&self) -> usize {
-        self.specifications.len()
+    pub fn channel_for(&self, action: Action) -> Result<Channel, ()> {
+        if self.inputs.contains(&action) {
+            Ok(Channel::new_in(action))
+        } else if self.outputs.contains(&action) {
+            Ok(Channel::new_out(action))
+        } else {
+            Err(())
+        }
     }
 }
 
@@ -147,12 +150,10 @@ impl IOA for Composition {
 
 impl TIOA for Composition {
     fn initial_location(&self) -> LocationTree {
-        LocationTree::new_branch(
-            self.specifications
-                .iter()
-                .map(|tioa| tioa.initial_location())
-                .collect(),
-        )
+        LocationTree::new_branch(vec![
+            self.lhs.initial_location(),
+            self.rhs.initial_location(),
+        ])
     }
 
     fn outgoing_traversals(
@@ -165,36 +166,44 @@ impl TIOA for Composition {
         }
 
         if let LocationTree::Branch(sources) = source {
-            // It is a common action between all aggregate systems.
-            // Therefore, the transition happens for all simultaneously.
+            if sources.len() != 2 {
+                return Err(())
+            }
+
+            let lhs_location = &sources[0];
+            let rhs_location = &sources[1];
+
+            let mut lhs_traversals: Result<Vec<Traversal>, ()> = Err(());
+            let mut rhs_traversals: Result<Vec<Traversal>, ()> = Err(());
+
             if self.common_actions.contains(&action) {
-                // Retrieve all the outgoing traversals which is avaiable in the underlying specifications.
-                let mut traversals = Vec::with_capacity(self.specifications.len());
-                for (i, specification) in self.specifications.iter().enumerate() {
-                    match specification.outgoing_traversals(&sources[i], action) {
-                        Ok(outgoings) => traversals.push(outgoings.into_iter()),
-                        Err(_) => return Err(()),
-                    }
-                }
-
-                return Ok(Traversal::combinations(traversals.into_iter()).collect());
+                lhs_traversals = self.lhs.outgoing_traversals(lhs_location, action);
+                rhs_traversals = self.rhs.outgoing_traversals(rhs_location, action);
+            } else if self.lhs_unique_actions.contains(&action) {
+                lhs_traversals = self.lhs.outgoing_traversals(lhs_location, action);
+                let stay = Traversal::stay(rhs_location.clone());
+                rhs_traversals = Ok(vec![stay]);
+            } else if self.rhs_unique_actions.contains(&action) {
+                let stay = Traversal::stay(lhs_location.clone());
+                lhs_traversals = Ok(vec![stay]);
+                rhs_traversals = self.rhs.outgoing_traversals(rhs_location, action);
             }
 
-            let mut found_unique = false;
-            for (i, specification) in self.specifications.iter().enumerate() {
-                let mut traversals = Vec::with_capacity(self.specifications.len());
-
-                if !found_unique && self.unique_actions[i].contains(&action) {
-                    found_unique = true;
-                    match specification.outgoing_traversals(&sources[i], action) {
-                        Ok(outgoings) => traversals.push(outgoings.into_iter()),
-                        Err(_) => return Err(()),
-                    }
-                } else {
-                    let stay = Traversal::stay(sources[i].clone());
-                    traversals.push(vec![stay].into_iter());
-                }
+            if lhs_traversals.is_err() || rhs_traversals.is_err() {
+                return Err(());
             }
+
+            let combinations: Vec<Traversal> = Traversal::combinations(
+                self.channel_for(action).unwrap(),
+                vec![
+                    lhs_traversals.unwrap().into_iter(),
+                    rhs_traversals.unwrap().into_iter(),
+                ]
+                .into_iter(),
+            )
+            .collect();
+
+            return Ok(combinations);
         }
 
         return Err(());
@@ -202,27 +211,31 @@ impl TIOA for Composition {
 
     fn location(&self, tree: &LocationTree) -> Result<Location, ()> {
         if let LocationTree::Branch(locations) = tree {
-            if locations.len() != self.size() {
+            if locations.len() != 2 {
                 return Err(());
             }
 
-            let sub_locations = locations
-                .iter()
-                .enumerate()
-                .map(|(i, location)| self.specifications[i].location(location));
+            let lhs_location = self.lhs.location(&locations[0]);
+            if lhs_location.is_err() {
+                return Err(());
+            }
 
-            if sub_locations
-                .clone()
-                .any(|sub_location| sub_location.is_err())
-            {
+            let rhs_location = self.rhs.location(&locations[1]);
+            if rhs_location.is_err() {
                 return Err(());
             }
 
             return Ok(Location::combine(
-                sub_locations.map(|sub_location| sub_location.unwrap()),
+                vec![lhs_location.unwrap(), rhs_location.unwrap()].into_iter(),
             ));
         }
 
         Err(())
+    }
+}
+
+impl From<Composition> for Specification {
+    fn from(value: Composition) -> Self {
+        Self::new(value)
     }
 }

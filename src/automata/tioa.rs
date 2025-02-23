@@ -1,10 +1,17 @@
 use std::fmt::Display;
 
+use dyn_clone::DynClone;
 use itertools::Itertools;
 
-use petgraph::graph::NodeIndex;
+use petgraph::{
+    graph::{DiGraph, NodeIndex},
+    Graph,
+};
 
-use super::{action::Action, edge::Edge, ioa::IOA, location::Location, ta::TA};
+use super::{
+    action::Action, automaton::Automaton, channel::Channel, edge::Edge, ioa::IOA,
+    location::Location, ta::TA,
+};
 
 #[derive(PartialEq, Eq, Clone, Hash, Debug)]
 pub enum LocationTree {
@@ -86,7 +93,7 @@ impl Traversal {
         }
     }
 
-    pub fn conjoin(traversals: Vec<Traversal>) -> Traversal {
+    pub fn conjoin(channel: Channel, traversals: Vec<Traversal>) -> Traversal {
         let locations = traversals
             .iter()
             .map(|traversal| traversal.destination().clone())
@@ -99,21 +106,22 @@ impl Traversal {
             })
             .collect();
         Traversal::step(
-            Edge::conjoin(edges).ok().unwrap(),
+            Edge::conjoin(channel, edges).ok().unwrap(),
             LocationTree::new_branch(locations),
         )
     }
 
     pub fn combinations(
+        channel: Channel,
         traversals: impl Iterator<Item = impl Iterator<Item = Self> + Clone>,
     ) -> impl Iterator<Item = Self> {
         traversals
             .multi_cartesian_product()
-            .map(|traversals| Traversal::conjoin(traversals))
+            .map(move |traversals| Traversal::conjoin(channel.clone(), traversals))
     }
 }
 
-pub trait TIOA
+pub trait TIOA: DynClone
 where
     Self: TA + IOA,
 {
@@ -125,6 +133,8 @@ where
         action: Action,
     ) -> Result<Vec<Traversal>, ()>;
 }
+
+dyn_clone::clone_trait_object!(TIOA);
 
 #[cfg(test)]
 mod tests {
@@ -147,10 +157,6 @@ mod tests {
         ]
         .into_iter();
         let combinations: Vec<LocationTree> = LocationTree::combinations(locations).collect();
-
-        for location in combinations.iter() {
-            println!("{}", location);
-        }
 
         assert!(combinations.contains(&LocationTree::new_branch(vec![
             zero.clone(),
