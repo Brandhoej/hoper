@@ -1,9 +1,8 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use petgraph::{
-    dot::{Config, Dot},
     graph::{DiGraph, EdgeIndex, EdgeReference, NodeIndex},
-    visit::{EdgeRef, IntoEdgeReferences},
+    visit::EdgeRef,
     Direction::{Incoming, Outgoing},
     Graph,
 };

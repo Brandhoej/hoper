@@ -10,7 +10,7 @@ use super::{
 
 pub trait DBMState: Sized {}
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DBM<State: DBMState> {
     /// The number of clocks inside the DBM.
     clocks: Clock,
@@ -278,12 +278,6 @@ impl<State: DBMState> DBM<State> {
             }
         }
         false
-    }
-
-    /// Returns true if the DBM is in cannonical form by checking if closing requires changes.
-    #[inline]
-    pub fn is_closed(&self) -> bool {
-        todo!()
     }
 
     pub fn fmt_conjunctions(&self, labels: &Vec<&str>) -> String {
@@ -870,6 +864,13 @@ impl DBM<Canonical> {
         let end = self.upper_relations().iter().max().unwrap().clone();
         Interval::new(start, end)
     }
+
+    pub fn is_closed(&self) -> bool {
+        match self.clone().dirty().clean() {
+            Ok(cleaned) => self.relations == cleaned.relations,
+            Err(_) => false,
+        }
+    }
 }
 
 pub struct Unsafe {}
@@ -1038,7 +1039,8 @@ mod tests {
         bounds::Bounds,
         constraint::{
             Relation, RelationsSample, Strictness, UniformRelations, INFINITY, REFERENCE, ZERO,
-        }, federation::Federation,
+        },
+        federation::Federation,
     };
 
     use super::{Canonical, Dirty, DBM};
@@ -1639,16 +1641,25 @@ mod tests {
         assert!(federation_1234.includes_dbm(&dbm2()));
         assert!(federation_1234.includes_dbm(&dbm3()));
         assert!(federation_1234.includes_dbm(&dbm4()));
-        assert!(federation_1234.clone().subtraction(&federation_1234).is_empty());
-        
+        assert!(federation_1234
+            .clone()
+            .subtraction(&federation_1234)
+            .is_empty());
+
         let federation_123 = Federation::new(vec![dbm1(), dbm2(), dbm3()]);
         assert!(federation_123.includes(&federation_123));
         assert!(federation_123.includes_dbm(&dbm1()));
         assert!(federation_123.includes_dbm(&dbm2()));
         assert!(federation_123.includes_dbm(&dbm3()));
         assert!(federation_123.includes_dbm(&dbm4()));
-        assert!(federation_123.clone().subtraction(&federation_123).is_empty());
-        assert!(federation_123.clone().subtraction(&federation_1234).is_empty());
+        assert!(federation_123
+            .clone()
+            .subtraction(&federation_123)
+            .is_empty());
+        assert!(federation_123
+            .clone()
+            .subtraction(&federation_1234)
+            .is_empty());
 
         let federation_12 = Federation::new(vec![dbm1(), dbm2()]);
         assert!(federation_12.includes(&federation_12));
@@ -1657,8 +1668,14 @@ mod tests {
         assert!(!federation_12.includes_dbm(&dbm3()));
         assert!(!federation_12.includes_dbm(&dbm4()));
         assert!(federation_12.clone().subtraction(&federation_12).is_empty());
-        assert!(federation_12.clone().subtraction(&federation_123).is_empty());
-        assert!(federation_12.clone().subtraction(&federation_1234).is_empty());
+        assert!(federation_12
+            .clone()
+            .subtraction(&federation_123)
+            .is_empty());
+        assert!(federation_12
+            .clone()
+            .subtraction(&federation_1234)
+            .is_empty());
 
         let federation_1 = Federation::new(vec![dbm1()]);
         assert!(federation_1.includes(&federation_1));
@@ -1669,9 +1686,13 @@ mod tests {
         assert!(federation_1.clone().subtraction(&federation_1).is_empty());
         assert!(federation_1.clone().subtraction(&federation_12).is_empty());
         assert!(federation_1.clone().subtraction(&federation_123).is_empty());
-        assert!(federation_1.clone().subtraction(&federation_1234).is_empty());
+        assert!(federation_1
+            .clone()
+            .subtraction(&federation_1234)
+            .is_empty());
 
         let mut incremental_federation = Federation::new(vec![]);
+        assert!(incremental_federation.is_empty());
         incremental_federation.append(dbm1());
         assert!(incremental_federation.includes_dbm(&dbm1()));
         incremental_federation.append(dbm2());
@@ -1680,14 +1701,18 @@ mod tests {
         assert!(incremental_federation.includes_dbm(&dbm3()));
         incremental_federation.append(dbm4());
         assert!(incremental_federation.includes_dbm(&dbm4()));
-        
+
         incremental_federation = incremental_federation.subtract(&dbm1());
         assert!(!incremental_federation.includes_dbm(&dbm1()));
+        incremental_federation.append(dbm1());
         incremental_federation = incremental_federation.subtract(&dbm2());
         assert!(!incremental_federation.includes_dbm(&dbm2()));
+        incremental_federation.append(dbm2());
         incremental_federation = incremental_federation.subtract(&dbm3());
         assert!(!incremental_federation.includes_dbm(&dbm3()));
+        incremental_federation.append(dbm3());
         incremental_federation = incremental_federation.subtract(&dbm4());
         assert!(!incremental_federation.includes_dbm(&dbm4()));
+        incremental_federation.append(dbm4());
     }
 }

@@ -5,8 +5,8 @@ use itertools::Itertools;
 use crate::{automata::tiots::TIOTS, zones::intervals::Interval};
 
 use super::{
-    action::Action, ioa::IOA, specification::Specification, state_set::StateSet, tioa::Traversal,
-    tiots::State,
+    action::Action, computation_tree::ComputationTree, ioa::IOA, specification::Specification,
+    state_set::StateSet, tioa::Traversal, tiots::State,
 };
 
 #[derive(Clone)]
@@ -158,6 +158,9 @@ impl Refinement {
         // An example where work is shared between threads can be seen here:
         // https://docs.rs/crossbeam/latest/crossbeam/deque/index.html
 
+        let mut implementation_computation_tree = ComputationTree::new();
+        let mut specification_computation_tree = ComputationTree::new();
+
         let mut implementation_passed: StateSet = StateSet::new();
         let mut specification_passed: StateSet = StateSet::new();
         let mut worklist: VecDeque<RefinementStatePair> = VecDeque::new();
@@ -173,12 +176,14 @@ impl Refinement {
         };
 
         while let Some(pair) = worklist.pop_front() {
-            let len = worklist.len();
-            println!("{}", len);
-
             let mut products: Vec<
                 Box<dyn Iterator<Item = ((State, Traversal), (State, Traversal))>>,
             > = Vec::with_capacity(4);
+
+            let implementation_node =
+                implementation_computation_tree.add_node(pair.implementation().location().clone());
+            let specification_node =
+                specification_computation_tree.add_node(pair.specification().location().clone());
 
             // Rule 1 (Common inputs): Both the specification and implementaion can react on the input.
             // Whenever t -i?->ᵀ t' for some t' ∈ Qᵀ and i? ∈ Actᵀᵢ ∩ Actᔆᵢ , then s -i?->ᔆ s' and (s', t') ∈ R for some s' ∈ Qᔆ

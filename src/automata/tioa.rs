@@ -3,15 +3,9 @@ use std::fmt::Display;
 use dyn_clone::DynClone;
 use itertools::Itertools;
 
-use petgraph::{
-    graph::{DiGraph, NodeIndex},
-    Graph,
-};
+use petgraph::graph::NodeIndex;
 
-use super::{
-    action::Action, automaton::Automaton, channel::Channel, edge::Edge, ioa::IOA,
-    location::Location, ta::TA,
-};
+use super::{action::Action, channel::Channel, edge::Edge, ioa::IOA, location::Location, ta::TA};
 
 #[derive(PartialEq, Eq, Clone, Hash, Debug)]
 pub enum LocationTree {

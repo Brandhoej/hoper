@@ -3,7 +3,7 @@ use std::{
     num::{NonZeroU32, NonZeroU64},
 };
 
-use dashmap::{DashMap, Entry};
+use dashmap::DashMap;
 use symbol_table::SymbolTable;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]

@@ -4,7 +4,18 @@ mod tests {
     use petgraph::dot::Dot;
 
     use crate::automata::{
-        action::Action, automaton::{Automaton, IntoAutomaton}, automaton_builder::AutomatonBuilder, composition::Composition, expressions::{Comparison, Expression}, input_enabled::InputEnabled, ioa::IOA, literal::Literal, partitioned_symbol_table::PartitionedSymbolTable, refinement::Refinement, statements::Statement, ta::TA
+        action::Action,
+        automaton::{Automaton, IntoAutomaton},
+        automaton_builder::AutomatonBuilder,
+        composition::Composition,
+        expressions::{Comparison, Expression},
+        input_enabled::InputEnabled,
+        ioa::IOA,
+        literal::Literal,
+        partitioned_symbol_table::PartitionedSymbolTable,
+        refinement::Refinement,
+        statements::Statement,
+        ta::TA,
     };
 
     fn new_specification(symbols: &mut PartitionedSymbolTable) -> Automaton {
@@ -409,11 +420,13 @@ mod tests {
         let machine_administration = Composition::new(
             machine.is_input_enabled().unwrap(),
             administration.is_input_enabled().unwrap(),
-        ).unwrap();
+        )
+        .unwrap();
         let machine_administration_researcher = Composition::new(
             Box::new(machine_administration.into()),
             researcher.is_input_enabled().unwrap(),
-        ).unwrap();
+        )
+        .unwrap();
 
         let coin = Action::new(symbols.intern(0, "coin"));
         let coffee = Action::new(symbols.intern(0, "coffee"));
@@ -425,15 +438,22 @@ mod tests {
         assert!(machine_administration_researcher.inputs().contains(&grant));
         assert!(machine_administration_researcher.outputs().contains(&news));
         assert!(machine_administration_researcher.outputs().contains(&coin));
-        assert!(machine_administration_researcher.outputs().contains(&coffee));
+        assert!(machine_administration_researcher
+            .outputs()
+            .contains(&coffee));
         assert!(machine_administration_researcher.outputs().contains(&tea));
-        assert!(machine_administration_researcher.outputs().contains(&publication));
+        assert!(machine_administration_researcher
+            .outputs()
+            .contains(&publication));
 
         assert_eq!(machine_administration_researcher.inputs().len(), 1);
         assert_eq!(machine_administration_researcher.outputs().len(), 5);
         assert_eq!(machine_administration_researcher.clock_count(), 3);
 
-        let automaton = machine_administration_researcher.clone().into_automaton().unwrap();
+        let automaton = machine_administration_researcher
+            .clone()
+            .into_automaton()
+            .unwrap();
 
         assert_eq!(automaton.node_iter().try_len().unwrap(), 25);
         assert_eq!(automaton.edge_iter().try_len().unwrap(), 97);
@@ -496,7 +516,58 @@ mod tests {
         let machine_administration = Composition::new(
             machine.is_input_enabled().unwrap(),
             administration.is_input_enabled().unwrap(),
-        ).unwrap();
+        )
+        .unwrap();
+
+        let refinment = Refinement::new(
+            Box::new(machine_administration.clone().into()),
+            Box::new(machine_administration.clone().into()),
+        );
+        assert!(refinment.is_ok());
+        assert!(refinment.unwrap().refines());
+    }
+
+    #[test]
+    fn composition_of_machine_researcher_refines_self() {
+        // The interplay between the machine and researcher fails.
+        // However, machine and administration succeeds.
+        // Also, researcher and administration succeeds.
+        let mut symbols = PartitionedSymbolTable::new();
+        let machine = new_machine(&mut symbols);
+        let researcher = new_researcher(&mut symbols);
+
+        let machine_administration = Composition::new(
+            machine.is_input_enabled().unwrap(),
+            researcher.is_input_enabled().unwrap(),
+        )
+        .unwrap();
+
+        let automaton = machine_administration.clone().into_automaton().unwrap();
+        let contextual_automaton = automaton.in_context(&symbols);
+        let contextual_graph = contextual_automaton.graph();
+        let bindings = vec![];
+        let dot = Dot::with_config(&contextual_graph, &bindings);
+        println!("{}", dot);
+
+        let refinment = Refinement::new(
+            Box::new(machine_administration.clone().into()),
+            Box::new(machine_administration.clone().into()),
+        );
+        assert!(refinment.is_ok());
+        assert!(refinment.unwrap().refines());
+    }
+
+    #[test]
+    fn composition_of_administration_researcher_refines_self() {
+        let mut symbols = PartitionedSymbolTable::new();
+        let machine = new_machine(&mut symbols);
+        let administration = new_administration(&mut symbols);
+
+        let machine_administration = Composition::new(
+            machine.is_input_enabled().unwrap(),
+            administration.is_input_enabled().unwrap(),
+        )
+        .unwrap();
 
         let refinment = Refinement::new(
             Box::new(machine_administration.clone().into()),
@@ -516,11 +587,13 @@ mod tests {
         let machine_administration = Composition::new(
             machine.is_input_enabled().unwrap(),
             administration.is_input_enabled().unwrap(),
-        ).unwrap();
+        )
+        .unwrap();
         let machine_administration_researcher = Composition::new(
             Box::new(machine_administration.into()),
             researcher.is_input_enabled().unwrap(),
-        ).unwrap();
+        )
+        .unwrap();
 
         let refinment = Refinement::new(
             Box::new(machine_administration_researcher.clone().into()),
@@ -537,15 +610,17 @@ mod tests {
         let machine = new_machine(&mut symbols);
         let administration = new_administration(&mut symbols);
         let researcher = new_researcher(&mut symbols);
-        
+
         let machine_administration = Composition::new(
             machine.is_input_enabled().unwrap(),
             administration.is_input_enabled().unwrap(),
-        ).unwrap();
+        )
+        .unwrap();
         let machine_administration_researcher = Composition::new(
             Box::new(machine_administration.into()),
             researcher.is_input_enabled().unwrap(),
-        ).unwrap();
+        )
+        .unwrap();
 
         let refinment = Refinement::new(
             Box::new(machine_administration_researcher.into()),

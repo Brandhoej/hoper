@@ -3,6 +3,7 @@ pub mod automaton;
 pub mod automaton_builder;
 pub mod channel;
 pub mod composition;
+pub mod computation_tree;
 pub mod conversion;
 pub mod ecdar_university_test;
 pub mod edge;

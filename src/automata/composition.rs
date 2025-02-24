@@ -167,7 +167,7 @@ impl TIOA for Composition {
 
         if let LocationTree::Branch(sources) = source {
             if sources.len() != 2 {
-                return Err(())
+                return Err(());
             }
 
             let lhs_location = &sources[0];

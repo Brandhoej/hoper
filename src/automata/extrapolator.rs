@@ -65,10 +65,6 @@ impl Extrapolator {
                     }
 
                     let rhs_bounds = self.bounds(bounds, state, rhs);
-                    if self.stack.is_empty() {
-                        let str = rhs.to_string();
-                        println!("{}", str);
-                    }
                     let rhs_bool = self.stack.pop().unwrap().boolean().unwrap();
 
                     if !rhs_bool {

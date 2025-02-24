@@ -1,3 +1,4 @@
+use core::fmt;
 use std::vec;
 
 use super::{
@@ -67,8 +68,9 @@ impl Federation {
         }
 
         // If the dbm was not included in self then we append it.
-        if !self.remove_subsets(&dbm) {
-            self.dbms.push(dbm);
+        let included = self.remove_subsets(&dbm);
+        if !included {
+            self.dbms.push(dbm.clone());
         }
     }
 
@@ -169,7 +171,7 @@ impl Federation {
 
     #[inline]
     pub fn includes_dbm(&self, other: &DBM<Canonical>) -> bool {
-        if self.dbms.iter().all(|inner| inner.is_subset_of(other)) {
+        if self.dbms.iter().any(|inner| inner.is_superset_of(other)) {
             return true;
         }
 
@@ -340,5 +342,72 @@ impl From<DBM<Canonical>> for Federation {
             return Federation::empty(dbm.clocks());
         }
         Federation::new(vec![dbm])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::zones::{
+        constraint::{Relation, INFINITY},
+        dbm::DBM,
+        federation::Federation,
+    };
+
+    #[test]
+    fn regression_1() {
+        // Story: The Refinement did not terminate. Exploration found that the federation
+        //   when calling append with a DBM did not guarantee to include the DBM afterwards.
+        // Federation: "(-x ≤ 0 ∧ x - y ≤ 0 ∧ -y ≤ 0 ∧ y - x ≤ 0)"
+        // DBM: "-x ≤ -2 ∧ x - y ≤ 0 ∧ -y ≤ -2 ∧ y - x ≤ 0"
+        // It looks like that DBM::relation states that the DBM in the federation is a superset of the DBM.
+        //   This is crealy incorrect as they are two points not laying on eachother.
+
+        let mut dbm1_dirty = DBM::zero(2).dirty();
+        dbm1_dirty[(0, 0)] = Relation::weak(0);
+        dbm1_dirty[(0, 1)] = Relation::weak(0);
+        dbm1_dirty[(0, 2)] = Relation::weak(0);
+        dbm1_dirty[(1, 0)] = INFINITY;
+        dbm1_dirty[(1, 1)] = Relation::weak(0);
+        dbm1_dirty[(1, 2)] = Relation::weak(0);
+        dbm1_dirty[(2, 0)] = INFINITY;
+        dbm1_dirty[(2, 1)] = Relation::weak(0);
+        dbm1_dirty[(2, 2)] = Relation::weak(0);
+        let dbm1 = dbm1_dirty.clean().ok().unwrap();
+
+        let mut dbm2_dirty = DBM::zero(2).dirty();
+        dbm2_dirty[(0, 0)] = Relation::weak(0);
+        dbm2_dirty[(0, 1)] = Relation::weak(-2);
+        dbm2_dirty[(0, 2)] = Relation::weak(-2);
+        dbm2_dirty[(1, 0)] = INFINITY;
+        dbm2_dirty[(1, 1)] = Relation::weak(0);
+        dbm2_dirty[(1, 2)] = Relation::weak(0);
+        dbm2_dirty[(2, 0)] = INFINITY;
+        dbm2_dirty[(2, 1)] = Relation::weak(0);
+        dbm2_dirty[(2, 2)] = Relation::weak(0);
+        let dbm2 = dbm2_dirty.clean().ok().unwrap();
+
+        assert_eq!(
+            "-x ≤ 0 ∧ x - y ≤ 0 ∧ -y ≤ 0 ∧ y - x ≤ 0",
+            dbm1.fmt_conjunctions(&vec!["x", "y"])
+        );
+        assert_eq!(
+            "-x ≤ -2 ∧ x - y ≤ 0 ∧ -y ≤ -2 ∧ y - x ≤ 0",
+            dbm2.fmt_conjunctions(&vec!["x", "y"])
+        );
+
+        assert!(dbm1.is_subset_of(&dbm1));
+        assert!(dbm2.is_subset_of(&dbm2));
+
+        assert!(dbm2.is_subset_of(&dbm1));
+        assert!(!dbm1.is_subset_of(&dbm2));
+
+        assert!(!dbm2.is_superset_of(&dbm1));
+        assert!(dbm1.is_superset_of(&dbm2));
+
+        let mut federation = Federation::new(vec![dbm1]);
+        assert!(federation.includes_dbm(&dbm2));
+
+        federation.append(dbm2.clone());
+        assert!(federation.includes_dbm(&dbm2));
     }
 }
