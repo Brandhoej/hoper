@@ -185,19 +185,6 @@ impl Automaton {
         self.graph.node_count()
     }
 
-    /// Adds an edge to the underlying graph without ensuring that adding the edge breaks any
-    /// of the rules of the Automaton. An example is non-determinism, where an existing edge
-    /// can lead to a different state from the same state as the edge to be added. Ergo, this
-    /// functionality should be used with extreme caution.
-    pub fn force_add_edge(
-        &mut self,
-        source: NodeIndex,
-        edge: Edge,
-        destination: NodeIndex,
-    ) -> EdgeIndex {
-        self.graph.add_edge(source, destination, edge)
-    }
-
     pub fn in_context<'a>(
         &'a self,
         symbols: &'a PartitionedSymbolTable,
