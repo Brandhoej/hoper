@@ -34,6 +34,7 @@ impl Interpreter {
                 state.mut_zone().reset(clock, *limit);
                 state
             }
+            Statement::NOP => state,
         }
     }
 }

@@ -58,6 +58,17 @@ impl Location {
         }
     }
 
+    pub fn fullname(&self) -> Vec<PartitionedSymbol> {
+        match self {
+            Location::Leaf { name, .. } => vec![name.clone()],
+            Location::Branch(locations) => locations
+                .iter()
+                .map(|location| location.fullname())
+                .flatten()
+                .collect(),
+        }
+    }
+
     pub const fn is_leaf(&self) -> bool {
         matches!(self, Location::Leaf { .. })
     }
@@ -69,17 +80,15 @@ impl Location {
 
 impl Display for Location {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Location::Leaf { name, invariant } => write!(f, "[{}, {}]", name, invariant),
-            Location::Branch(locations) => {
-                if locations.is_empty() {
-                    return write!(f, "()");
-                }
+        let fullname = self.fullname();
+        let invariant = self.invariant();
 
-                let join = locations.iter().map(ToString::to_string).join(",");
-                write!(f, "({})", join)
-            }
-        }
+        write!(
+            f,
+            "{}\n{}",
+            fullname.iter().map(|symbol| symbol.to_string()).join(", "),
+            invariant
+        )
     }
 }
 
@@ -96,24 +105,17 @@ impl<'a> ContextualLocation<'a> {
 
 impl<'a> Display for ContextualLocation<'a> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self.location {
-            Location::Leaf { name, invariant } => write!(
-                f,
-                "[{}, {}]",
-                self.symbols.resolve(name),
-                invariant.in_context(self.symbols)
-            ),
-            Location::Branch(locations) => {
-                if locations.is_empty() {
-                    return write!(f, "()");
-                }
+        let fullname = self.location.fullname();
+        let invariant = self.location.invariant();
 
-                let join = locations
-                    .iter()
-                    .map(|location| location.in_context(&self.symbols).to_string())
-                    .join(",");
-                write!(f, "({})", join)
-            }
-        }
+        write!(
+            f,
+            "{}\n{}",
+            fullname
+                .iter()
+                .map(|symbol| self.symbols.resolve(symbol))
+                .join(", "),
+            invariant.in_context(self.symbols)
+        )
     }
 }

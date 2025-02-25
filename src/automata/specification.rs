@@ -4,11 +4,12 @@ use crate::zones::constraint::Clock;
 
 use super::{
     action::Action,
+    edge::Edge,
     ioa::IOA,
     location::Location,
     partitioned_symbol_table::PartitionedSymbol,
     ta::TA,
-    tioa::{LocationTree, Traversal, TIOA},
+    tioa::{EdgeTree, LocationTree, Traversal, TIOA},
 };
 
 /// A specification is an automaton which is input-enabled.
@@ -66,6 +67,10 @@ impl TIOA for Specification {
 
     fn location(&self, tree: &LocationTree) -> Result<Location, ()> {
         self.0.location(tree)
+    }
+
+    fn edge(&self, tree: &EdgeTree) -> Result<Edge, ()> {
+        self.0.edge(tree)
     }
 }
 

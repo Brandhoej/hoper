@@ -74,6 +74,15 @@ impl Expression {
         Self::ClockConstraint(Box::new(operand), comparison, Box::new(limit))
     }
 
+    pub fn new_diagonal_clock_constraint(
+        lhs: Self,
+        rhs: Self,
+        comparison: Comparison,
+        limit: Self,
+    ) -> Self {
+        Self::DiagonalClockConstraint(Box::new(lhs), Box::new(rhs), comparison, Box::new(limit))
+    }
+
     pub fn not(self) -> Self {
         Self::Unary(Unary::LogicalNegation, Box::new(self))
     }

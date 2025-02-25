@@ -11,6 +11,7 @@ use super::{
 
 #[derive(Clone, Debug)]
 pub enum Statement {
+    NOP,
     Sequence(Vec<Statement>),
     Branch(Vec<Statement>),
     Expression(Expression),
@@ -37,6 +38,9 @@ impl Display for Statement {
             Statement::Reset(symbol, limit) => {
                 write!(f, "{:?} = {}", symbol, limit)
             }
+            Statement::NOP => {
+                write!(f, "")
+            }
         }
     }
 }
@@ -48,6 +52,10 @@ impl Statement {
 
     pub const fn empty() -> Self {
         Self::Sequence(vec![])
+    }
+
+    pub const fn nop() -> Self {
+        Self::NOP
     }
 
     pub const fn branch(statements: Vec<Self>) -> Self {
@@ -91,7 +99,7 @@ impl<'a> Display for ContextualStatement<'a> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self.statement {
             Statement::Expression(expression) => {
-                writeln!(f, "{}", expression.in_context(self.symbols))
+                write!(f, "{};", expression.in_context(self.symbols))
             }
             Statement::Sequence(statements) | Statement::Branch(statements) => {
                 if statements.is_empty() {
@@ -118,6 +126,9 @@ impl<'a> Display for ContextualStatement<'a> {
             }
             Statement::Reset(symbol, limit) => {
                 write!(f, "{} = {}", self.symbols.resolve(symbol), limit)
+            }
+            Statement::NOP => {
+                write!(f, "")
             }
         }
     }

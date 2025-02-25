@@ -149,7 +149,7 @@ impl<State: DBMState> DBM<State> {
             self.up();
         } else if !relation.is_zero() {
             for clock in REFERENCE + 1..self.dimensions() {
-                self.set_upper(clock, self.lower(clock) + relation);
+                self.set_upper(clock, self.lower(clock).negation() + relation);
             }
         }
     }
@@ -560,6 +560,21 @@ impl DBM<Canonical> {
         self.maybe_intersects(other) && self.clone().intersection(other).is_some()
     }
 
+    // Returns the interval of delay which can come from self to after.
+    pub fn delayed_by(&self, after: &Self) -> Interval {
+        let before_interval = self.interval();
+        let a = before_interval.to_string();
+        let after_interval = after.interval();
+        let b = after_interval.to_string();
+        let start = after_interval.lower().subtraction(&before_interval.lower());
+        let c = start.to_string();
+        let end = start + after_interval.included();
+        let d = end.to_string();
+        Interval::new(start, end)
+    }
+
+    pub fn interval_intersection(&mut self, other: &mut Self) {}
+
     pub fn close_ij(mut self, i: Clock, j: Clock) -> Result<DBM<Canonical>, DBM<Unsafe>> {
         if self.clocks <= 2 {
             return Ok(self);
@@ -859,10 +874,23 @@ impl DBM<Canonical> {
     }
 
     pub fn interval(&self) -> Interval {
-        let lowest = self.lower_relations().iter().min().unwrap().clone();
+        /*let lowest = self.lower_relations().iter().max().unwrap().clone();
         let start = Relation::new(-lowest.limit(), lowest.strictness());
         let end = self.upper_relations().iter().max().unwrap().clone();
-        Interval::new(start, end)
+        Interval::new(start, end)*/
+
+        let mut global_lower = INFINITY;
+        let mut headroom = INFINITY;
+
+        for clock in REFERENCE+1..self.dimensions() {
+            let lower = self.lower(clock).negate_limit();
+            let upper = self.upper(clock);
+
+            global_lower = global_lower.min(lower);
+            headroom = headroom.min(upper - lower);
+        }
+
+        Interval::new(global_lower, global_lower + headroom)
     }
 
     pub fn is_closed(&self) -> bool {
@@ -1634,6 +1662,79 @@ mod tests {
     }
 
     #[test]
+    fn delayed_by() {
+        let dbm1 = dbm1();
+        assert_eq!("(2, 3)", dbm1.interval().to_string());
+        let delayed_by = dbm1.delayed_by(&dbm1);
+        assert_eq!("[0, 1)", delayed_by.to_string());
+
+        let dbm2 = dbm2();
+        assert_eq!("(2, 4)", dbm2.interval().to_string());
+        let delayed_by = dbm2.delayed_by(&dbm2);
+        assert_eq!("[0, 2)", delayed_by.to_string());
+
+        let zero = DBM::zero(1);
+        assert_eq!("[0, 0]", zero.interval().to_string());
+        let delayed_by = zero.delayed_by(&dbm1);
+        assert_eq!("(2, 3)", delayed_by.to_string());
+
+        let universe = DBM::universe(1);
+        assert_eq!("[0, ∞]", universe.interval().to_string());
+        let delayed_by = universe.delayed_by(&dbm1);
+        assert_eq!("(2, 3)", delayed_by.to_string());
+
+        let delayed_by = zero.delayed_by(&zero);
+        assert_eq!("[0, 0]", delayed_by.to_string());
+        let delayed_by = universe.delayed_by(&universe);
+        assert_eq!("[0, ∞]", delayed_by.to_string());
+    }
+
+    #[test]
+    fn delay_to() {
+        let zero = DBM::zero(1);
+        let mut dbm1 = dbm1();
+        let mut dbm2 = dbm2();
+
+        let delayed_by_1 = zero.delayed_by(&dbm1);
+        assert_eq!("(2, 3)", delayed_by_1.to_string());
+
+        let delayed_by_2 = zero.delayed_by(&dbm2);
+        assert_eq!("(2, 4)", delayed_by_2.to_string());
+
+        let intersection = delayed_by_1.intersection(&delayed_by_2).unwrap();
+        assert_eq!("(2, 3)", intersection.to_string());
+
+        let included = intersection.included();
+        assert_eq!("(1, <)", included.to_string());
+
+        dbm1.delay_to(included);
+        let delayed_by_1 = zero.delayed_by(&dbm1);
+        assert_eq!("(2, 3)", delayed_by_1.to_string());
+
+        dbm2.delay_to(included);
+        let delayed_by_2 = zero.delayed_by(&dbm2);
+        assert_eq!("(2, 3)", delayed_by_2.to_string());
+    }
+
+    #[test]
+    fn delayed_by_example() {
+        let universe = DBM::universe(1);
+        let mut dbm1 = universe.clone();
+        dbm1.set_lower(1, Relation::strict(-15));
+        let mut dbm2 = universe.clone();
+        dbm2.set_upper(1, Relation::weak(15));
+
+        let delayed_by_1 = universe.delayed_by(&dbm1);
+        assert_eq!("(15, ∞]", delayed_by_1.to_string());
+
+        let delayed_by_2 = universe.delayed_by(&dbm2);
+        assert_eq!("[0, 15]", delayed_by_2.to_string());
+
+        let intersection = delayed_by_1.intersection(&delayed_by_2);
+        assert!(intersection.is_none());
+    }
+
+    #[test]
     fn empty_subtraction() {
         let federation_1234 = Federation::new(vec![dbm1(), dbm2(), dbm3(), dbm4()]);
         assert!(federation_1234.includes(&federation_1234));
@@ -1678,10 +1779,14 @@ mod tests {
             .is_empty());
 
         let federation_1 = Federation::new(vec![dbm1()]);
+        assert!(dbm1().is_subset_of(&dbm1()));
+        assert!(!dbm2().is_subset_of(&dbm1()));
+        assert!(!dbm3().is_subset_of(&dbm1()));
+        assert!(!dbm4().is_subset_of(&dbm1()));
         assert!(federation_1.includes(&federation_1));
         assert!(federation_1.includes_dbm(&dbm1()));
-        assert!(federation_1.includes_dbm(&dbm2()));
-        assert!(federation_1.includes_dbm(&dbm3()));
+        assert!(!federation_1.includes_dbm(&dbm2()));
+        assert!(!federation_1.includes_dbm(&dbm3()));
         assert!(!federation_1.includes_dbm(&dbm4()));
         assert!(federation_1.clone().subtraction(&federation_1).is_empty());
         assert!(federation_1.clone().subtraction(&federation_12).is_empty());

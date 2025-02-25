@@ -34,7 +34,7 @@ pub struct Extrapolator {
     stack: Vec<Literal>,
 }
 
-// TODO: FIX EXtrapolator which does not handle mix of boolean logic and tightning/loosning of zones.
+// TODO: FIX Extrapolator which does not handle mix of boolean logic and tightning/loosning of zones.
 impl Extrapolator {
     pub fn new() -> Self {
         Self { stack: Vec::new() }

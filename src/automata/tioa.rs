@@ -3,7 +3,7 @@ use std::fmt::Display;
 use dyn_clone::DynClone;
 use itertools::Itertools;
 
-use petgraph::graph::NodeIndex;
+use petgraph::graph::{EdgeIndex, NodeIndex};
 
 use super::{action::Action, channel::Channel, edge::Edge, ioa::IOA, location::Location, ta::TA};
 
@@ -14,20 +14,26 @@ pub enum LocationTree {
 }
 
 impl LocationTree {
-    pub const fn new_leaf(node: NodeIndex) -> Self {
-        Self::Leaf(node)
+    pub const fn new_leaf(index: NodeIndex) -> Self {
+        Self::Leaf(index)
     }
 
     pub const fn new_branch(locations: Vec<Self>) -> Self {
         Self::Branch(locations)
     }
 
-    pub fn combinations(
+    pub fn new_branches(
         locations: impl Iterator<Item = impl Iterator<Item = Self> + Clone>,
     ) -> impl Iterator<Item = Self> {
         locations
             .multi_cartesian_product()
             .map(|locations| Self::Branch(locations))
+    }
+}
+
+impl From<NodeIndex> for LocationTree {
+    fn from(value: NodeIndex) -> Self {
+        LocationTree::new_leaf(value)
     }
 }
 
@@ -37,7 +43,7 @@ impl Display for LocationTree {
             LocationTree::Leaf(index) => write!(f, "{}", index.index()),
             LocationTree::Branch(locations) => write!(
                 f,
-                "{}",
+                "({})",
                 locations
                     .iter()
                     .map(|location| format!("{}", location))
@@ -47,44 +53,86 @@ impl Display for LocationTree {
     }
 }
 
+#[derive(PartialEq, Eq, Clone, Hash, Debug)]
+pub enum EdgeTree {
+    Identity,
+    Leaf(EdgeIndex),
+    Branch(Vec<EdgeTree>),
+}
+
+impl EdgeTree {
+    pub const fn leaf(index: EdgeIndex) -> Self {
+        Self::Leaf(index)
+    }
+
+    pub const fn branch(edges: Vec<Self>) -> Self {
+        Self::Branch(edges)
+    }
+
+    pub const fn identity() -> Self {
+        Self::Identity
+    }
+
+    pub fn branches(
+        locations: impl Iterator<Item = impl Iterator<Item = Self> + Clone>,
+    ) -> impl Iterator<Item = Self> {
+        locations
+            .multi_cartesian_product()
+            .map(|locations| Self::Branch(locations))
+    }
+
+    pub fn is_identity(&self) -> bool {
+        matches!(self, Self::Identity)
+    }
+}
+
+impl From<EdgeIndex> for EdgeTree {
+    fn from(value: EdgeIndex) -> Self {
+        EdgeTree::leaf(value)
+    }
+}
+
+impl Display for EdgeTree {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EdgeTree::Leaf(index) => write!(f, "{:#?}", *index),
+            EdgeTree::Branch(edges) => write!(
+                f,
+                "({})",
+                edges
+                    .iter()
+                    .map(|location| format!("{}", location))
+                    .join(", ")
+            ),
+            EdgeTree::Identity => write!(f, ""),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
-pub enum Traversal {
-    Step {
-        edge: Edge,
-        destination: LocationTree,
-    },
-    Stay {
-        location: LocationTree,
-    },
+pub struct Traversal {
+    edge: EdgeTree,
+    destination: LocationTree,
 }
 
 impl Traversal {
-    pub const fn step(edge: Edge, location: LocationTree) -> Self {
-        Self::Step {
+    pub const fn step(edge: EdgeTree, location: LocationTree) -> Self {
+        Self {
             edge,
             destination: location,
         }
     }
 
     pub const fn stay(location: LocationTree) -> Self {
-        Self::Stay { location }
+        Self::step(EdgeTree::identity(), location)
     }
 
-    pub const fn edge(&self) -> Option<&Edge> {
-        match self {
-            Traversal::Step { edge, .. } => Some(edge),
-            Traversal::Stay { .. } => None,
-        }
+    pub const fn edge(&self) -> &EdgeTree {
+        &self.edge
     }
 
     pub const fn destination(&self) -> &LocationTree {
-        match self {
-            Traversal::Step {
-                destination: location,
-                ..
-            }
-            | Traversal::Stay { location } => location,
-        }
+        &self.destination
     }
 
     pub fn conjoin(channel: Channel, traversals: Vec<Traversal>) -> Traversal {
@@ -92,17 +140,12 @@ impl Traversal {
             .iter()
             .map(|traversal| traversal.destination().clone())
             .collect();
+        // FIXME: IF THE TRAVERSAL IS A SAY THEN THERE IS NO EDGETREE WHICH MAKES A COMPOSITION NOT RECOGNISE THE EDGE.
         let edges = traversals
             .iter()
-            .filter_map(|traversal| match traversal.edge() {
-                Some(edge) => Some(edge.clone()),
-                None => None,
-            })
+            .map(|traversal| traversal.edge().clone())
             .collect();
-        Traversal::step(
-            Edge::conjoin(channel, edges).ok().unwrap(),
-            LocationTree::new_branch(locations),
-        )
+        Traversal::step(EdgeTree::branch(edges), LocationTree::new_branch(locations))
     }
 
     pub fn combinations(
@@ -121,6 +164,7 @@ where
 {
     fn initial_location(&self) -> LocationTree;
     fn location(&self, tree: &LocationTree) -> Result<Location, ()>;
+    fn edge(&self, tree: &EdgeTree) -> Result<Edge, ()>;
     fn outgoing_traversals(
         &self,
         source: &LocationTree,
@@ -150,7 +194,7 @@ mod tests {
             locations_c.into_iter(),
         ]
         .into_iter();
-        let combinations: Vec<LocationTree> = LocationTree::combinations(locations).collect();
+        let combinations: Vec<LocationTree> = LocationTree::new_branches(locations).collect();
 
         assert!(combinations.contains(&LocationTree::new_branch(vec![
             zero.clone(),

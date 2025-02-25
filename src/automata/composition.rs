@@ -5,12 +5,13 @@ use crate::zones::constraint::Clock;
 use super::{
     action::Action,
     channel::Channel,
+    edge::Edge,
     ioa::IOA,
     location::Location,
     partitioned_symbol_table::PartitionedSymbol,
     specification::Specification,
     ta::TA,
-    tioa::{LocationTree, Traversal, TIOA},
+    tioa::{EdgeTree, LocationTree, Traversal, TIOA},
 };
 
 /// Represents the parallel composition of two timed input-output automata (TIOAs) A¹ and A².
@@ -187,6 +188,8 @@ impl TIOA for Composition {
                 let stay = Traversal::stay(lhs_location.clone());
                 lhs_traversals = Ok(vec![stay]);
                 rhs_traversals = self.rhs.outgoing_traversals(rhs_location, action);
+            } else {
+                unreachable!()
             }
 
             if lhs_traversals.is_err() || rhs_traversals.is_err() {
@@ -215,22 +218,47 @@ impl TIOA for Composition {
                 return Err(());
             }
 
-            let lhs_location = self.lhs.location(&locations[0]);
-            if lhs_location.is_err() {
-                return Err(());
-            }
-
-            let rhs_location = self.rhs.location(&locations[1]);
-            if rhs_location.is_err() {
-                return Err(());
-            }
+            let lhs_location = self.lhs.location(&locations[0])?;
+            let rhs_location = self.rhs.location(&locations[1])?;
 
             return Ok(Location::combine(
-                vec![lhs_location.unwrap(), rhs_location.unwrap()].into_iter(),
+                vec![lhs_location, rhs_location].into_iter(),
             ));
         }
 
         Err(())
+    }
+
+    fn edge(&self, tree: &EdgeTree) -> Result<Edge, ()> {
+        match tree {
+            EdgeTree::Branch(edges) if edges.len() == 2 => {
+                if edges.len() != 2 {
+                    return Err(());
+                }
+
+                let mut edge_composition: Vec<Edge> = Vec::with_capacity(2);
+                let mut channel: Option<Channel> = None;
+
+                if !edges[0].is_identity() {
+                    let lhs_edge = self.lhs.edge(&edges[0])?;
+                    edge_composition.push(lhs_edge.clone());
+                    channel = Some(lhs_edge.channel().clone());
+                }
+
+                if !edges[1].is_identity() {
+                    let rhs_edge = self.rhs.edge(&edges[1])?;
+                    edge_composition.push(rhs_edge.clone());
+                    channel = Some(rhs_edge.channel().clone());
+                }
+
+                return if let Some(channel) = channel {
+                    Ok(Edge::conjoin(channel, edge_composition).ok().unwrap())
+                } else {
+                    Err(())
+                };
+            }
+            _ => Err(()),
+        }
     }
 }
 

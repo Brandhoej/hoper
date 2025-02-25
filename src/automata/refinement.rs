@@ -1,12 +1,18 @@
 use std::collections::{HashSet, VecDeque};
 
 use itertools::Itertools;
+use petgraph::graph::NodeIndex;
 
 use crate::{automata::tiots::TIOTS, zones::intervals::Interval};
 
 use super::{
-    action::Action, computation_tree::ComputationTree, ioa::IOA, specification::Specification,
-    state_set::StateSet, tioa::Traversal, tiots::State,
+    action::Action,
+    computation_tree::ComputationTree,
+    ioa::IOA,
+    specification::Specification,
+    state_set::StateSet,
+    tioa::{LocationTree, Traversal, TIOA},
+    tiots::State,
 };
 
 #[derive(Clone)]
@@ -136,6 +142,13 @@ impl Refinement {
         })
     }
 
+    pub fn initial_locations(&self) -> (LocationTree, LocationTree) {
+        (
+            self.implementation.initial_location(),
+            self.specification.initial_location(),
+        )
+    }
+
     pub fn initial(&self) -> Result<RefinementStatePair, ()> {
         let implementation_state = self.implementation.initial_state();
         if let Err(()) = implementation_state {
@@ -153,49 +166,75 @@ impl Refinement {
         )
     }
 
-    pub fn refines(&self) -> bool {
+    pub fn refines(
+        &self,
+    ) -> Result<(ComputationTree, ComputationTree), (ComputationTree, ComputationTree)> {
         // TODO: Use crossbeam to multi-thread the refinment check.
         // An example where work is shared between threads can be seen here:
         // https://docs.rs/crossbeam/latest/crossbeam/deque/index.html
 
-        let mut implementation_computation_tree = ComputationTree::new();
-        let mut specification_computation_tree = ComputationTree::new();
-
         let mut implementation_passed: StateSet = StateSet::new();
         let mut specification_passed: StateSet = StateSet::new();
-        let mut worklist: VecDeque<RefinementStatePair> = VecDeque::new();
+        let mut worklist: VecDeque<(NodeIndex, NodeIndex, RefinementStatePair)> = VecDeque::new();
+
+        let (root_implementation_tree, root_specification_tree) = self.initial_locations();
+        let mut implementation_computation_tree = ComputationTree::new(root_implementation_tree);
+        let mut specification_computation_tree = ComputationTree::new(root_specification_tree);
 
         // (qᔆ₀, qᵀ₀) ∈ R
         match self.initial() {
             Ok(initial) => {
                 implementation_passed.insert(initial.implementation());
                 specification_passed.insert(initial.specification());
-                worklist.push_back(initial)
+
+                /*implementation_computation_tree.decorate(
+                    implementation_computation_tree.root(),
+                    initial
+                        .implementation()
+                        .ref_zone()
+                        .fmt_conjunctions(&vec!["x", "y"]),
+                );
+                specification_computation_tree.decorate(
+                    specification_computation_tree.root(),
+                    initial
+                        .specification()
+                        .ref_zone()
+                        .fmt_conjunctions(&vec!["x", "y"]),
+                );*/
+
+                worklist.push_back((
+                    implementation_computation_tree.root(),
+                    specification_computation_tree.root(),
+                    initial,
+                ))
             }
-            Err(_) => return false,
+            Err(_) => {
+                implementation_computation_tree.is_error(implementation_computation_tree.root());
+                specification_computation_tree.is_error(specification_computation_tree.root());
+
+                return Err((
+                    implementation_computation_tree,
+                    specification_computation_tree,
+                ));
+            }
         };
 
-        while let Some(pair) = worklist.pop_front() {
+        while let Some((source_implementation, source_specification, pair)) = worklist.pop_front() {
             let mut products: Vec<
                 Box<dyn Iterator<Item = ((State, Traversal), (State, Traversal))>>,
             > = Vec::with_capacity(4);
-
-            let implementation_node =
-                implementation_computation_tree.add_node(pair.implementation().location().clone());
-            let specification_node =
-                specification_computation_tree.add_node(pair.specification().location().clone());
 
             // Rule 1 (Common inputs): Both the specification and implementaion can react on the input.
             // Whenever t -i?->ᵀ t' for some t' ∈ Qᵀ and i? ∈ Actᵀᵢ ∩ Actᔆᵢ , then s -i?->ᔆ s' and (s', t') ∈ R for some s' ∈ Qᔆ
             for input in self.common_inputs.iter() {
                 let mut specification_states = self
                     .specification
-                    .traversals(&pair.specification(), input)
+                    .guards(&pair.specification(), input)
                     .peekable();
 
                 let mut implementation_states = self
                     .implementation
-                    .traversals(&pair.implementation(), input)
+                    .guards(&pair.implementation(), input)
                     .peekable();
 
                 // I believe that since both are specifications then thet must both be input-enabled.
@@ -213,7 +252,7 @@ impl Refinement {
             for input in self.unique_specification_inputs.iter() {
                 let mut specification_states = self
                     .specification
-                    .traversals(pair.specification(), input)
+                    .guards(pair.specification(), input)
                     .peekable();
 
                 // I believe that since both are specifications then thet must both be input-enabled.
@@ -237,7 +276,7 @@ impl Refinement {
             for output in self.common_outputs.iter() {
                 let mut implementation_states = self
                     .implementation
-                    .traversals(pair.implementation(), output)
+                    .guards(pair.implementation(), output)
                     .peekable();
 
                 // Only if the implementation can produce an output is it
@@ -249,12 +288,18 @@ impl Refinement {
                 // The specification should be able to produce the output since the implementation can.
                 let mut specification_states = self
                     .specification
-                    .traversals(pair.specification(), output)
+                    .guards(pair.specification(), output)
                     .peekable();
 
                 // The specification could not produce the output the implementation could.
                 if specification_states.peek().is_none() {
-                    return false;
+                    implementation_computation_tree.is_error(source_implementation);
+                    specification_computation_tree.is_error(source_specification);
+
+                    return Err((
+                        implementation_computation_tree,
+                        specification_computation_tree,
+                    ));
                 }
 
                 products.push(Box::new(
@@ -267,7 +312,7 @@ impl Refinement {
             for output in self.unique_implementation_outputs.iter() {
                 let mut implementation_states = self
                     .implementation
-                    .traversals(pair.implementation(), output)
+                    .guards(pair.implementation(), output)
                     .peekable();
 
                 if implementation_states.peek().is_none() {
@@ -286,50 +331,48 @@ impl Refinement {
                 ))
             }
 
-            let original_implementation_interval = pair.implementation.ref_zone().interval();
-            let original_specification_interval = pair.specification.ref_zone().interval();
-
             for product in products {
                 for (
                     (mut implementation_state, implementation_traversal),
                     (mut specification_state, specification_traversal),
                 ) in product
                 {
-                    let implementation_interval = implementation_state.ref_zone().interval();
-                    let implementation_start = original_implementation_interval
-                        .lower()
-                        .difference(implementation_interval.lower());
-                    let implementation_end =
-                        implementation_start + implementation_interval.included();
-                    let adjusted_implementation_interval =
-                        Interval::new(implementation_start, implementation_end);
-
-                    let specification_interval = specification_state.ref_zone().interval();
-                    let specification_start = original_specification_interval
-                        .lower()
-                        .difference(specification_interval.lower());
-                    let specification_end = specification_start + specification_interval.included();
-                    let adjusted_specification_interval =
-                        Interval::new(specification_start, specification_end);
+                    let implementation_delay_by = pair
+                        .implementation
+                        .ref_zone()
+                        .delayed_by(implementation_state.ref_zone());
+                    let specification_delay_by = pair
+                        .specification
+                        .ref_zone()
+                        .delayed_by(specification_state.ref_zone());
 
                     // The adjusted intervals do not overlap. This means that the two edges were not enabled at the same time.
-                    if adjusted_specification_interval
-                        .intersection(&adjusted_implementation_interval)
-                        .is_none()
-                    {
-                        continue;
+                    let interval_intersection =
+                        implementation_delay_by.intersection(&specification_delay_by);
+                    match interval_intersection {
+                        Some(intersection) => {
+                            // FIXME!!! I STRONGLY Believe this is buggy because it trims the last aspect.
+                            // However, it may be from left-to-right and right-to-left on different ones.
+                            specification_state
+                                .mut_zone()
+                                .delay_to(intersection.included());
+                            implementation_state
+                                .mut_zone()
+                                .delay_to(intersection.included());
+                        }
+                        None => continue,
                     }
 
                     // Perform the traversal of the edges (Implementation and specification):
                     implementation_state = self
                         .implementation
-                        .discrete(implementation_state, &implementation_traversal)
+                        .update(implementation_state, &implementation_traversal)
                         .unwrap();
                     implementation_state = self.implementation.delay(implementation_state).unwrap();
 
                     specification_state = self
                         .specification
-                        .discrete(specification_state, &specification_traversal)
+                        .update(specification_state, &specification_traversal)
                         .unwrap();
                     specification_state = self.specification.delay(specification_state).unwrap();
 
@@ -351,15 +394,57 @@ impl Refinement {
                             }
 
                             if !visited {
-                                worklist.push_back(pair);
+                                let destination_implementation = implementation_computation_tree
+                                    .enqueue(source_implementation, implementation_traversal);
+                                let destination_specification = specification_computation_tree
+                                    .enqueue(source_specification, specification_traversal);
+
+                                /*implementation_computation_tree.decorate(
+                                    destination_implementation,
+                                    pair.implementation()
+                                        .ref_zone()
+                                        .fmt_conjunctions(&vec!["x", "y"]),
+                                );
+                                specification_computation_tree.decorate(
+                                    destination_specification,
+                                    pair.specification()
+                                        .ref_zone()
+                                        .fmt_conjunctions(&vec!["x", "y"]),
+                                );*/
+
+                                worklist.push_back((
+                                    destination_implementation,
+                                    destination_specification,
+                                    pair,
+                                ));
                             }
                         }
-                        Err(_) => return false,
+                        // TODO: Shown in the counter-example what went wrong here.
+                        Err(_) => {
+                            let destination_implementation = implementation_computation_tree
+                                .enqueue(source_implementation, implementation_traversal);
+                            let destination_specification = specification_computation_tree
+                                .enqueue(source_specification, specification_traversal);
+
+                            implementation_computation_tree.is_error(destination_implementation);
+                            specification_computation_tree.is_error(destination_specification);
+
+                            return Err((
+                                implementation_computation_tree,
+                                specification_computation_tree,
+                            ));
+                        }
                     };
                 }
             }
+
+            implementation_computation_tree.dequeue(source_implementation);
+            specification_computation_tree.dequeue(source_specification);
         }
 
-        true
+        Ok((
+            implementation_computation_tree,
+            specification_computation_tree,
+        ))
     }
 }

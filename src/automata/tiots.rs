@@ -1,5 +1,3 @@
-use dyn_clone::DynClone;
-
 use crate::{
     automata::extrapolator::Extrapolator,
     zones::{
@@ -112,8 +110,9 @@ where
 {
     fn initial_state(&self) -> Result<State, ()>;
     fn delay(&self, state: State) -> Result<State, ()>;
-    fn discrete(&self, state: State, traversal: &Traversal) -> Result<State, ()>;
-    fn traversals(
+    fn update(&self, state: State, traversal: &Traversal) -> Result<State, ()>;
+    fn guard(&self, state: State, traversal: &Traversal) -> Result<State, ()>;
+    fn guards(
         &self,
         state: &State,
         action: &Action,
@@ -144,24 +143,38 @@ impl<T: ?Sized + TIOA> TIOTS for T {
         state.extrapolate(bounds)
     }
 
-    /// Performs the discrete step over the edge updating the state with the traversal's edge update.
-    fn discrete(&self, mut state: State, traversal: &Traversal) -> Result<State, ()> {
-        // Interpreting the edge's update statement updates the clock values.
-        // This can essentially reset, assign, or something else the clock values.
-        // Closure is not applied on the state as the operations allowed on clocks
-        // in the update statements will always produce a closed and non-empty state.
-        let mut interpreter = Interpreter::new();
-
-        if let Traversal::Step { edge, destination } = traversal {
-            state = interpreter.statement(state, edge.update());
-            state.set_location(destination.clone());
+    fn update(&self, mut state: State, traversal: &Traversal) -> Result<State, ()> {
+        if traversal.edge().is_identity() {
+            return Ok(state);
         }
+
+        let edge = self.edge(traversal.edge()).unwrap();
+
+        let mut interpreter = Interpreter::new();
+        state = interpreter.statement(state, edge.update());
+        state.set_location(traversal.destination().clone());
 
         Ok(state)
     }
 
+    fn guard(&self, state: State, traversal: &Traversal) -> Result<State, ()> {
+        if traversal.edge().is_identity() {
+            return Ok(state);
+        }
+
+        let edge = self.edge(traversal.edge()).unwrap();
+
+        let mut extrapolator = Extrapolator::new();
+        let edge_bounds = extrapolator.bounds(Bounds::new(), &state, edge.guard());
+
+        match state.extrapolate(edge_bounds) {
+            Ok(extrapolation) => Ok(extrapolation),
+            Err(_) => return Err(()),
+        }
+    }
+
     /// Returns the states enabled by the edge and the traversal.
-    fn traversals(
+    fn guards(
         &self,
         state: &State,
         action: &Action,
@@ -174,15 +187,12 @@ impl<T: ?Sized + TIOA> TIOTS for T {
 
                 // Extrapolating the state on the guard's bounds means that the state becomming a
                 // subset of the original state. This subset is the set allowed to traverse the edge.
-                if let Traversal::Step { ref edge, .. } = traversal {
-                    let edge_bounds = extrapolator.bounds(Bounds::new(), &state, edge.guard());
-                    return match state.clone().extrapolate(edge_bounds) {
-                        Ok(extrapolation) => Some((extrapolation, traversal)),
-                        Err(_) => None,
-                    };
-                }
-
-                Some((state.clone(), traversal))
+                let edge = self.edge(traversal.edge());
+                let edge_bounds = extrapolator.bounds(Bounds::new(), &state, edge.unwrap().guard());
+                return match state.clone().extrapolate(edge_bounds) {
+                    Ok(extrapolation) => Some((extrapolation, traversal)),
+                    Err(_) => None,
+                };
             })
             .into_iter()
     }
@@ -192,19 +202,28 @@ impl<T: ?Sized + TIOA> TIOTS for T {
 mod tests {
     use std::collections::HashSet;
 
-    use petgraph::graph::DiGraph;
+    use itertools::Itertools;
+    use petgraph::{graph::DiGraph, visit::EdgeRef};
 
-    use crate::automata::{
-        action::Action,
-        automaton::Automaton,
-        edge::Edge,
-        expressions::{Comparison, Expression},
-        literal::Literal,
-        location::Location,
-        partitioned_symbol_table::PartitionedSymbolTable,
-        statements::Statement,
-        tioa::{LocationTree, Traversal, TIOA},
-        tiots::TIOTS,
+    use crate::{
+        automata::{
+            action::Action,
+            automaton::Automaton,
+            automaton_builder::AutomatonBuilder,
+            edge::Edge,
+            environment::Environment,
+            expressions::{Comparison, Expression},
+            literal::Literal,
+            location::Location,
+            partitioned_symbol_table::PartitionedSymbolTable,
+            statements::Statement,
+            tioa::{EdgeTree, LocationTree, Traversal, TIOA},
+            tiots::TIOTS,
+        },
+        zones::{
+            constraint::{Relation, REFERENCE},
+            dbm::DBM,
+        },
     };
 
     #[test]
@@ -273,11 +292,11 @@ mod tests {
             initial_state.ref_zone().fmt_conjunctions(&vec!["x"])
         );
 
-        let edge_01 = automaton.outgoing(node_0).collect::<Vec<_>>()[0].weight();
+        let edge_01 = automaton.outgoing(node_0).collect::<Vec<_>>()[0].id();
         let mut following = automaton
-            .discrete(
+            .update(
                 initial_state,
-                &Traversal::step(edge_01.clone(), automaton.location_tree(node_1)),
+                &Traversal::step(EdgeTree::leaf(edge_01), LocationTree::new_leaf(node_1)),
             )
             .unwrap();
         following = automaton.delay(following).unwrap();
@@ -285,5 +304,376 @@ mod tests {
             "-x ≤ 0 ∧ x < 10",
             following.ref_zone().fmt_conjunctions(&vec!["x"])
         );
+    }
+
+    #[test]
+    fn test_automaton_2() {
+        let symbols = &mut PartitionedSymbolTable::new();
+        let mut builder = AutomatonBuilder::new(symbols);
+
+        let x = builder.add_clock(0, "x");
+
+        let loc0_index = builder.add_location_with_name(0, "loc0");
+        let loc1_index = builder.add_location(
+            0,
+            "loc1",
+            Expression::new_clock_constraint(x.into(), Comparison::LessThanOrEqual, 8.into()),
+        );
+        let loc2_index = builder.add_location_with_name(0, "loc2");
+        let loc3_index = builder.add_location_with_name(0, "loc3");
+
+        builder.set_initial_location(loc0_index);
+
+        let e01_index = builder.add_edge_input(
+            0,
+            loc0_index,
+            loc1_index,
+            "action",
+            Some(Expression::new_clock_constraint(
+                x.into(),
+                Comparison::LessThanOrEqual,
+                15.into(),
+            )),
+            Some(Statement::reset(x, 0)),
+        );
+        let e12_index = builder.add_edge_input(
+            0,
+            loc1_index,
+            loc2_index,
+            "action",
+            Some(Expression::new_clock_constraint(
+                x.into(),
+                Comparison::GreaterThanOrEqual,
+                4.into(),
+            )),
+            Some(Statement::reset(x, 0)),
+        );
+        let e23_index = builder.add_edge_input(
+            0,
+            loc3_index,
+            loc3_index,
+            "action",
+            Some(Expression::new_clock_constraint(
+                x.into(),
+                Comparison::GreaterThan,
+                15.into(),
+            )),
+            None,
+        );
+
+        let automaton = builder.build().unwrap();
+        assert_eq!(automaton.inputs().try_len().unwrap(), 1);
+        assert_eq!(automaton.outputs().try_len().unwrap(), 0);
+        assert_eq!(automaton.node_iter().try_len().unwrap(), 4);
+        assert_eq!(automaton.edge_iter().try_len().unwrap(), 3);
+
+        let e01 = EdgeTree::leaf(e01_index);
+        let e12 = EdgeTree::leaf(e12_index);
+        let e23 = EdgeTree::leaf(e23_index);
+
+        let loc1 = LocationTree::new_leaf(loc1_index);
+        let loc2 = LocationTree::new_leaf(loc2_index);
+        let loc3 = LocationTree::new_leaf(loc3_index);
+
+        let mut state = automaton.initial_state().unwrap();
+        assert_eq!("-x ≤ 0", state.ref_zone().fmt_conjunctions(&vec!["x"]));
+
+        state = automaton
+            .update(state, &Traversal::step(e01, loc1))
+            .unwrap();
+        assert_eq!(
+            "-x ≤ 0 ∧ x ≤ 0",
+            state.ref_zone().fmt_conjunctions(&vec!["x"])
+        );
+
+        state = automaton.delay(state).unwrap();
+        assert_eq!(
+            "-x ≤ 0 ∧ x ≤ 8",
+            state.ref_zone().fmt_conjunctions(&vec!["x"])
+        );
+
+        state = automaton
+            .update(state, &Traversal::step(e12, loc2))
+            .unwrap();
+        assert_eq!(
+            "-x ≤ 0 ∧ x ≤ 0",
+            state.ref_zone().fmt_conjunctions(&vec!["x"])
+        );
+
+        state = automaton.delay(state).unwrap();
+        assert_eq!("-x ≤ 0", state.ref_zone().fmt_conjunctions(&vec!["x"]));
+
+        state = automaton
+            .update(state, &Traversal::step(e23, loc3))
+            .unwrap();
+        assert_eq!("-x ≤ 0", state.ref_zone().fmt_conjunctions(&vec!["x"]));
+    }
+
+    #[test]
+    fn test_automaton_3() {
+        let symbols = &mut PartitionedSymbolTable::new();
+        let mut builder = AutomatonBuilder::new(symbols);
+
+        let x_id = builder.add_clock(0, "x");
+        let y_id = builder.add_clock(0, "y");
+
+        let loc0 = builder.add_location_with_name(0, "loc0");
+        let loc1 = builder.add_location_with_name(0, "loc1");
+        let loc2 = builder.add_location_with_name(0, "loc2");
+        let loc3 = builder.add_location_with_name(0, "loc3");
+        assert!(loc0 != loc1 && loc1 != loc2 && loc2 != loc3);
+
+        builder.set_initial_location(loc0);
+
+        // if -x ≤ 0 ∧ x - y ≤ -6 ∧ -y ≤ -6 ∧ y - x < 23
+        let guard_0 = Expression::conjunctions(vec![
+            Expression::new_diagonal_clock_constraint(
+                x_id.into(),
+                y_id.into(),
+                Comparison::GreaterThanOrEqual,
+                6.into(),
+            ),
+            Expression::new_diagonal_clock_constraint(
+                y_id.into(),
+                x_id.into(),
+                Comparison::LessThan,
+                23.into(),
+            ),
+            Expression::new_clock_constraint(y_id.into(), Comparison::GreaterThanOrEqual, 6.into()),
+        ]); 
+        let e01 = builder.add_edge_input(0, loc0, loc1, "action", Some(guard_0), None);
+
+        // if y ≥ 2 ∧ x ≤ 15 then x := 0
+        let guard_1 = Expression::conjunctions(vec![
+            Expression::new_clock_constraint(y_id.into(), Comparison::GreaterThanOrEqual, 2.into()),
+            Expression::new_clock_constraint(x_id.into(), Comparison::LessThanOrEqual, 15.into()),
+        ]);
+        let e12 = builder.add_edge_input(0, loc1, loc2, "action", Some(guard_1), None);
+
+        // y ≥ 2 ∧ x > 15
+        let guard_2 = Expression::conjunctions(vec![
+            Expression::new_clock_constraint(y_id.into(), Comparison::GreaterThanOrEqual, 2.into()),
+            Expression::new_clock_constraint(x_id.into(), Comparison::GreaterThan, 15.into()),
+        ]);
+        let e13 = builder.add_edge_input(0, loc1, loc3, "action", Some(guard_2), None);
+
+        let automaton = builder.build().unwrap();
+        assert_eq!(automaton.inputs().try_len().unwrap(), 1);
+        assert_eq!(automaton.outputs().try_len().unwrap(), 0);
+        assert_eq!(automaton.node_iter().try_len().unwrap(), 4);
+        assert_eq!(automaton.edge_iter().try_len().unwrap(), 3);
+
+        let mut state = automaton.initial_state().unwrap();
+        let x = state.environment.get_clock(x_id).unwrap();
+        let y = state.environment.get_clock(y_id).unwrap();
+
+        let mut labels = vec!["", ""];
+        labels[(x - 1) as usize] = "x";
+        labels[(y - 1) as usize] = "y";
+
+        let conjunctions = state.ref_zone().fmt_conjunctions(&labels);
+        assert!(conjunctions.contains("-x ≤ 0"));
+        assert!(conjunctions.contains("x - y ≤ 0"));
+        assert!(conjunctions.contains("-y ≤ 0"));
+        assert!(conjunctions.contains("y - x ≤ 0"));
+
+        // Makes the initial state the universe.
+        state.mut_zone().free(x);
+        state.mut_zone().free(y);
+
+        let conjunctions = state.ref_zone().fmt_conjunctions(&labels);
+        assert!(conjunctions.contains("-x ≤ 0"));
+        assert!(conjunctions.contains("-y ≤ 0"));
+
+        state = automaton
+            .guard(state, &Traversal::step(e01.into(), loc1.into()))
+            .unwrap();
+
+        // -y ≤ -6 ∧ y - x < 23 ∧ -x ≤ 0 ∧ x - y ≤ -6
+        let conjunctions = state.ref_zone().fmt_conjunctions(&labels);
+        assert!(conjunctions.contains("-x ≤ 0"));
+        assert!(conjunctions.contains("x - y ≤ -6"));
+        assert!(conjunctions.contains("-y ≤ -6"));
+        assert!(conjunctions.contains("y - x < 23"));
+
+        let state_0 = automaton
+            .guard(state.clone(), &Traversal::step(e12.into(), loc2.into()))
+            .unwrap();
+
+        // -y ≤ -6 ∧ y < 38 ∧ y - x < 23 ∧ -x ≤ 0 ∧ x ≤ 15 ∧ x - y ≤ -6
+        let conjunctions = state_0.ref_zone().fmt_conjunctions(&labels);
+        assert!(conjunctions.contains("-y ≤ -6"));
+        assert!(conjunctions.contains("y < 38"));
+        assert!(conjunctions.contains("y - x < 23"));
+        assert!(conjunctions.contains("-x ≤ 0"));
+        assert!(conjunctions.contains("x ≤ 15"));
+        assert!(conjunctions.contains("x - y ≤ -6"));
+
+        let state_1 = automaton
+            .guard(state.clone(), &Traversal::step(e13.into(), loc3.into()))
+            .unwrap();
+
+        // -x < -15 ∧ x - y ≤ -6 ∧ -y < -21 ∧ y - x < 23
+        let conjunctions = state_1.ref_zone().fmt_conjunctions(&labels);
+        assert!(conjunctions.contains("-x < -15"));
+        assert!(conjunctions.contains("x - y ≤ -6"));
+        assert!(conjunctions.contains("-y < -21"));
+        assert!(conjunctions.contains("y - x < 23"));
+
+        assert_eq!("[0, ∞]", state.ref_zone().interval().to_string());
+        assert_eq!("[0, 15]", state_0.ref_zone().interval().to_string());
+        assert_eq!("(15, ∞]", state_1.ref_zone().interval().to_string());
+        
+        let delyed_by_0 = state.ref_zone().delayed_by(state_0.ref_zone());
+        assert_eq!("[0, 15]", delyed_by_0.to_string());
+
+        let delyed_by_1 = state.ref_zone().delayed_by(state_1.ref_zone());
+        assert_eq!("(15, ∞]", delyed_by_1.to_string());
+
+        assert!(delyed_by_0.intersection(&delyed_by_1).is_none());
+    }
+
+    #[test]
+    fn test_automaton_4() {
+        // This is like automaton_3 but where the guards overlap.
+
+        let symbols = &mut PartitionedSymbolTable::new();
+        let mut builder = AutomatonBuilder::new(symbols);
+
+        let x_id = builder.add_clock(0, "x");
+        let y_id = builder.add_clock(0, "y");
+
+        let loc0 = builder.add_location_with_name(0, "loc0");
+        let loc1 = builder.add_location_with_name(0, "loc1");
+        let loc2 = builder.add_location_with_name(0, "loc2");
+        let loc3 = builder.add_location_with_name(0, "loc3");
+        assert!(loc0 != loc1 && loc1 != loc2 && loc2 != loc3);
+
+        builder.set_initial_location(loc0);
+
+        // if -x ≤ 0 ∧ x - y ≤ -6 ∧ -y ≤ -6 ∧ y - x < 23
+        let guard_0 = Expression::conjunctions(vec![
+            Expression::new_diagonal_clock_constraint(
+                x_id.into(),
+                y_id.into(),
+                Comparison::GreaterThanOrEqual,
+                6.into(),
+            ),
+            Expression::new_diagonal_clock_constraint(
+                y_id.into(),
+                x_id.into(),
+                Comparison::LessThan,
+                23.into(),
+            ),
+            Expression::new_clock_constraint(y_id.into(), Comparison::GreaterThanOrEqual, 6.into()),
+        ]); 
+        let e01 = builder.add_edge_input(0, loc0, loc1, "action", Some(guard_0), None);
+
+        // if y ≥ 2 ∧ x ≤ 15 then x := 0
+        let guard_1 = Expression::conjunctions(vec![
+            Expression::new_clock_constraint(y_id.into(), Comparison::GreaterThanOrEqual, 2.into()),
+            Expression::new_clock_constraint(x_id.into(), Comparison::LessThanOrEqual, 15.into()),
+        ]);
+        let e12 = builder.add_edge_input(0, loc1, loc2, "action", Some(guard_1), None);
+
+        // y ≥ 2 ∧ x > 10
+        let guard_2 = Expression::conjunctions(vec![
+            Expression::new_clock_constraint(y_id.into(), Comparison::GreaterThanOrEqual, 2.into()),
+            Expression::new_clock_constraint(x_id.into(), Comparison::GreaterThan, 10.into()),
+        ]);
+        let e13 = builder.add_edge_input(0, loc1, loc3, "action", Some(guard_2), None);
+
+        let automaton = builder.build().unwrap();
+        assert_eq!(automaton.inputs().try_len().unwrap(), 1);
+        assert_eq!(automaton.outputs().try_len().unwrap(), 0);
+        assert_eq!(automaton.node_iter().try_len().unwrap(), 4);
+        assert_eq!(automaton.edge_iter().try_len().unwrap(), 3);
+
+        let mut state = automaton.initial_state().unwrap();
+        let x = state.environment.get_clock(x_id).unwrap();
+        let y = state.environment.get_clock(y_id).unwrap();
+
+        let mut labels = vec!["", ""];
+        labels[(x - 1) as usize] = "x";
+        labels[(y - 1) as usize] = "y";
+
+        let conjunctions = state.ref_zone().fmt_conjunctions(&labels);
+        assert!(conjunctions.contains("-x ≤ 0"));
+        assert!(conjunctions.contains("x - y ≤ 0"));
+        assert!(conjunctions.contains("-y ≤ 0"));
+        assert!(conjunctions.contains("y - x ≤ 0"));
+
+        // Makes the initial state the universe.
+        state.mut_zone().free(x);
+        state.mut_zone().free(y);
+
+        let conjunctions = state.ref_zone().fmt_conjunctions(&labels);
+        assert!(conjunctions.contains("-x ≤ 0"));
+        assert!(conjunctions.contains("-y ≤ 0"));
+
+        state = automaton
+            .guard(state, &Traversal::step(e01.into(), loc1.into()))
+            .unwrap();
+
+        // -y ≤ -6 ∧ y - x < 23 ∧ -x ≤ 0 ∧ x - y ≤ -6
+        let conjunctions = state.ref_zone().fmt_conjunctions(&labels);
+        assert!(conjunctions.contains("-x ≤ 0"));
+        assert!(conjunctions.contains("x - y ≤ -6"));
+        assert!(conjunctions.contains("-y ≤ -6"));
+        assert!(conjunctions.contains("y - x < 23"));
+
+        let state_0 = automaton
+            .guard(state.clone(), &Traversal::step(e12.into(), loc2.into()))
+            .unwrap();
+
+        // -y ≤ -6 ∧ y < 38 ∧ y - x < 23 ∧ -x ≤ 0 ∧ x ≤ 15 ∧ x - y ≤ -6
+        let conjunctions = state_0.ref_zone().fmt_conjunctions(&labels);
+        assert!(conjunctions.contains("-y ≤ -6"));
+        assert!(conjunctions.contains("y < 38"));
+        assert!(conjunctions.contains("y - x < 23"));
+        assert!(conjunctions.contains("-x ≤ 0"));
+        assert!(conjunctions.contains("x ≤ 15"));
+        assert!(conjunctions.contains("x - y ≤ -6"));
+
+        let state_1 = automaton
+            .guard(state.clone(), &Traversal::step(e13.into(), loc3.into()))
+            .unwrap();
+
+        // -x < -15 ∧ x - y ≤ -6 ∧ -y < -21 ∧ y - x < 23
+        let conjunctions = state_1.ref_zone().fmt_conjunctions(&labels);
+        assert!(conjunctions.contains("-x < -10"));
+        assert!(conjunctions.contains("x - y ≤ -6"));
+        assert!(conjunctions.contains("-y < -16"));
+        assert!(conjunctions.contains("y - x < 23"));
+
+        let state_interval = state.ref_zone().interval();
+        let state_interval_0 = state_0.ref_zone().interval();
+        let state_interval_1 = state_1.ref_zone().interval();
+
+        assert_eq!("[0, ∞]", state_interval.to_string());
+        assert_eq!("[0, 15]", state_interval_0.to_string());
+        assert_eq!("(10, ∞]", state_interval_1.to_string());
+        
+        let delyed_by_0 = state.ref_zone().delayed_by(state_0.ref_zone());
+        assert_eq!("[0, 15]", delyed_by_0.to_string());
+
+        let delyed_by_1 = state.ref_zone().delayed_by(state_1.ref_zone());
+        assert_eq!("(10, ∞]", delyed_by_1.to_string());
+
+        let intersection = delyed_by_0.intersection(&delyed_by_1);
+        assert!(intersection.is_some());
+
+        let intersection = intersection.unwrap();
+        assert_eq!("(10, 15]", intersection.to_string());
+
+        let lower_difference_0 = intersection.lower() - delyed_by_0.lower();
+        let upper_difference_0 = lower_difference_0 + intersection.included();
+        assert_eq!("(10, <)", lower_difference_0.to_string()); // Required expansion to fit intersection.
+        assert_eq!("(15, <)", upper_difference_0.to_string());
+
+        let lower_difference_1 = intersection.lower() - delyed_by_1.lower();
+        let upper_difference_1 = lower_difference_1 + intersection.included();
+        assert_eq!("(0, ≤)", lower_difference_1.to_string());
+        assert_eq!("(5, ≤)", upper_difference_1.to_string());
     }
 }

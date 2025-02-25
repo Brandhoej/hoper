@@ -17,7 +17,7 @@ use super::{
     location::{ContextualLocation, Location},
     partitioned_symbol_table::{PartitionedSymbol, PartitionedSymbolTable},
     ta::TA,
-    tioa::{LocationTree, Traversal, TIOA},
+    tioa::{EdgeTree, LocationTree, Traversal, TIOA},
 };
 
 /// A Timed Input/Output Automaton which describes real time behaviour using clocks over reals.
@@ -69,10 +69,6 @@ impl Automaton {
         self.graph.node_weight(index)
     }
 
-    pub fn location_tree(&self, index: NodeIndex) -> LocationTree {
-        LocationTree::new_leaf(index)
-    }
-
     pub fn edge(&self, index: EdgeIndex) -> Option<&Edge> {
         self.graph.edge_weight(index)
     }
@@ -89,7 +85,7 @@ impl Automaton {
         &'a self,
         edges: T,
     ) -> impl Iterator<Item = Traversal> + use<'a, T> {
-        edges.map(|edge| Traversal::step(edge.weight().clone(), self.location_tree(edge.target())))
+        edges.map(|edge| Traversal::step(EdgeTree::leaf(edge.id()), edge.target().into()))
     }
 
     pub fn edges<'a, T: Iterator<Item = EdgeReference<'a, Edge>> + 'a>(
@@ -242,6 +238,17 @@ impl TIOA for Automaton {
 
         Err(())
     }
+
+    fn edge(&self, tree: &EdgeTree) -> Result<Edge, ()> {
+        if let EdgeTree::Leaf(index) = tree {
+            return match self.edge(*index) {
+                Some(edge) => Ok(edge.clone()),
+                None => Err(()),
+            };
+        }
+
+        Err(())
+    }
 }
 
 pub trait IntoAutomaton {
@@ -276,7 +283,9 @@ impl<T: TIOA> IntoAutomaton for T {
                     let destination = *mapping
                         .entry(destination_tree.clone())
                         .or_insert_with(|| graph.add_node(to));
-                    graph.add_edge(source, destination, traversal.edge().unwrap().clone());
+                    let edge_tree = traversal.edge();
+                    let edge = self.edge(edge_tree).unwrap();
+                    graph.add_edge(source, destination, edge);
                     trees.push_back(destination_tree);
                 }
             }
