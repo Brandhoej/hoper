@@ -3,7 +3,10 @@ use std::collections::{
     HashMap,
 };
 
-use super::constraint::{Clock, Constraint, Limit, Relation, INFINITY, REFERENCE};
+use super::{
+    constraint::{Clock, Constraint, Limit, Relation, INFINITY, REFERENCE},
+    dbm::{DBMState, DBM},
+};
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Bounds {
@@ -153,6 +156,18 @@ impl Bounds {
             .iter()
             .map(|((i, j), _)| std::cmp::max(*i, *j))
             .max()
+    }
+}
+
+impl<S: DBMState> From<&DBM<S>> for Bounds {
+    fn from(dbm: &DBM<S>) -> Self {
+        let mut universe = Self::new();
+        for i in REFERENCE..dbm.dimensions() {
+            for j in REFERENCE..dbm.dimensions() {
+                universe = universe.set(i, j, dbm[(i, j)]);
+            }
+        }
+        universe
     }
 }
 

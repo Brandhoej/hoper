@@ -135,12 +135,11 @@ impl Traversal {
         &self.destination
     }
 
-    pub fn conjoin(channel: Channel, traversals: Vec<Traversal>) -> Traversal {
+    pub fn conjoin(traversals: Vec<Traversal>) -> Traversal {
         let locations = traversals
             .iter()
             .map(|traversal| traversal.destination().clone())
             .collect();
-        // FIXME: IF THE TRAVERSAL IS A SAY THEN THERE IS NO EDGETREE WHICH MAKES A COMPOSITION NOT RECOGNISE THE EDGE.
         let edges = traversals
             .iter()
             .map(|traversal| traversal.edge().clone())
@@ -149,12 +148,11 @@ impl Traversal {
     }
 
     pub fn combinations(
-        channel: Channel,
         traversals: impl Iterator<Item = impl Iterator<Item = Self> + Clone>,
     ) -> impl Iterator<Item = Self> {
         traversals
             .multi_cartesian_product()
-            .map(move |traversals| Traversal::conjoin(channel.clone(), traversals))
+            .map(move |traversals| Traversal::conjoin(traversals))
     }
 }
 
@@ -168,7 +166,7 @@ where
     fn outgoing_traversals(
         &self,
         source: &LocationTree,
-        action: Action,
+        channel: Channel,
     ) -> Result<Vec<Traversal>, ()>;
 }
 

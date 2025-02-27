@@ -1,4 +1,4 @@
-use std::ops::{Index, IndexMut};
+use std::ops::{Bound, Index, IndexMut};
 
 use bitset::BitSet;
 
@@ -84,20 +84,22 @@ impl<State: DBMState> DBM<State> {
     }
 
     #[inline]
-    fn upper(&self, clock: Clock) -> Relation {
+    pub fn upper(&self, clock: Clock) -> Relation {
         self.relations[self.index(clock, REFERENCE)].clone()
     }
 
     #[inline]
     fn set_upper(&mut self, clock: Clock, relation: Relation) {
-        assert!(relation.limit() >= 0);
+        if !relation.is_infinity() {
+            assert!(relation.limit() >= 0);
+        }
 
         let index = self.index(clock, REFERENCE);
         self.relations[index] = relation
     }
 
     #[inline]
-    fn lower(&self, clock: Clock) -> Relation {
+    pub fn lower(&self, clock: Clock) -> Relation {
         self.relations[self.index(REFERENCE, clock)].clone()
     }
 
@@ -494,8 +496,15 @@ impl DBM<Canonical> {
             bits.set(i as usize, true);
 
             for j in i + 1..self.dimensions() {
+                let ij = self[(i, j)];
+                let ji = self[(j, i)];
+
+                if ij.is_infinity() || ji.is_infinity() {
+                    continue;
+                }
+
                 // Check if the difference between the clocks' valuation will always be 0.
-                if self[(i, j)].limit() == -self[(j, i)].limit() {
+                if ij.limit() == -ji.limit() {
                     // Point back to the previous clock in the chain.
                     chains[k as usize] = j;
                     bits.set(j as usize, true);
@@ -560,20 +569,49 @@ impl DBM<Canonical> {
         self.maybe_intersects(other) && self.clone().intersection(other).is_some()
     }
 
+    pub fn clamp_inside(&mut self, interval: Interval) {
+        // TODO
+    }
+
+    pub fn clamp_test(&mut self, clock: Clock, interval: Interval) {
+        self.set_lower(clock, self.lower(clock) - interval.lower());
+        self.set_upper(clock, self.lower(clock).negation() + interval.included());
+    }
+
+    pub fn lowest(&self, clock: Clock) -> Relation {
+        (REFERENCE..self.dimensions())
+            .filter_map(|current| {
+                if current == clock {
+                    None
+                } else {
+                    Some(self[(current, clock)].abs())
+                }
+            })
+            .min()
+            .unwrap()
+    }
+
+    pub fn highest(&self, clock: Clock) -> Relation {
+        (REFERENCE..self.dimensions())
+            .filter_map(|current| {
+                if current == clock {
+                    None
+                } else {
+                    Some(self[(clock, current)].abs())
+                }
+            })
+            .min()
+            .unwrap()
+    }
+
     // Returns the interval of delay which can come from self to after.
     pub fn delayed_by(&self, after: &Self) -> Interval {
         let before_interval = self.interval();
-        let a = before_interval.to_string();
         let after_interval = after.interval();
-        let b = after_interval.to_string();
         let start = after_interval.lower().subtraction(&before_interval.lower());
-        let c = start.to_string();
         let end = start + after_interval.included();
-        let d = end.to_string();
         Interval::new(start, end)
     }
-
-    pub fn interval_intersection(&mut self, other: &mut Self) {}
 
     pub fn close_ij(mut self, i: Clock, j: Clock) -> Result<DBM<Canonical>, DBM<Unsafe>> {
         if self.clocks <= 2 {
@@ -874,23 +912,15 @@ impl DBM<Canonical> {
     }
 
     pub fn interval(&self) -> Interval {
-        /*let lowest = self.lower_relations().iter().max().unwrap().clone();
-        let start = Relation::new(-lowest.limit(), lowest.strictness());
-        let end = self.upper_relations().iter().max().unwrap().clone();
-        Interval::new(start, end)*/
-
-        let mut global_lower = INFINITY;
-        let mut headroom = INFINITY;
-
-        for clock in REFERENCE+1..self.dimensions() {
-            let lower = self.lower(clock).negate_limit();
-            let upper = self.upper(clock);
-
-            global_lower = global_lower.min(lower);
-            headroom = headroom.min(upper - lower);
-        }
-
-        Interval::new(global_lower, global_lower + headroom)
+        let (global_lower, global_upper) = (REFERENCE + 1..self.dimensions())
+            .map(|clock| (self.lower(clock).negate_limit(), self.upper(clock)))
+            .fold(
+                (INFINITY, INFINITY),
+                |(lower, upper), (current_lower, current_upper)| {
+                    (lower.min(current_lower), upper.min(current_upper))
+                },
+            );
+        Interval::new(global_lower, global_upper)
     }
 
     pub fn is_closed(&self) -> bool {
@@ -1069,6 +1099,7 @@ mod tests {
             Relation, RelationsSample, Strictness, UniformRelations, INFINITY, REFERENCE, ZERO,
         },
         federation::Federation,
+        intervals::Interval,
     };
 
     use super::{Canonical, Dirty, DBM};
@@ -1303,6 +1334,37 @@ mod tests {
     }
 
     #[test]
+    fn test_extrapolation() {
+        let mut dbm = DBM::universe(1);
+        dbm.set_lower(1, Relation::weak(-2));
+        assert_eq!("-x ≤ -2", dbm.fmt_conjunctions(&vec!["x"]));
+
+        let bounds: Bounds = (&dbm).into();
+        assert_eq!("(0, ≤)", bounds.get(0, 0).unwrap().to_string());
+        assert_eq!("(∞, ≤)", bounds.get(1, 0).unwrap().to_string());
+        assert_eq!("(-2, ≤)", bounds.get(0, 1).unwrap().to_string());
+        assert_eq!("(0, ≤)", bounds.get(1, 1).unwrap().to_string());
+
+        dbm.up();
+        assert_eq!("-x ≤ -2", dbm.fmt_conjunctions(&vec!["x"]));
+
+        let bounds: Bounds = (&dbm).into();
+        assert_eq!("(0, ≤)", bounds.get(0, 0).unwrap().to_string());
+        assert_eq!("(∞, ≤)", bounds.get(1, 0).unwrap().to_string());
+        assert_eq!("(-2, ≤)", bounds.get(0, 1).unwrap().to_string());
+        assert_eq!("(0, ≤)", bounds.get(1, 1).unwrap().to_string());
+
+        dbm = dbm.extrapolate(bounds).ok().unwrap();
+        assert_eq!("-x ≤ -2", dbm.fmt_conjunctions(&vec!["x"]));
+
+        let bounds: Bounds = (&dbm).into();
+        assert_eq!("(0, ≤)", bounds.get(0, 0).unwrap().to_string());
+        assert_eq!("(∞, ≤)", bounds.get(1, 0).unwrap().to_string());
+        assert_eq!("(-2, ≤)", bounds.get(0, 1).unwrap().to_string());
+        assert_eq!("(0, ≤)", bounds.get(1, 1).unwrap().to_string());
+    }
+
+    #[test]
     fn extrapolation_universe_with_delayed_bounds() {
         let dbm = DBM::universe(2);
         let bounds = Bounds::universe(2);
@@ -1449,22 +1511,22 @@ mod tests {
         );
 
         let dbm1_interval = dbm1.interval();
-        assert_eq!("(1, <)", dbm1_interval.included().to_string());
-        assert_eq!("(2, 3)", dbm1_interval.to_string());
+        assert_eq!("(2, <)", dbm1_interval.included().to_string());
+        assert_eq!("(1, 3)", dbm1_interval.to_string());
 
         let dbm2_interval = dbm2.interval();
-        assert_eq!("(2, <)", dbm2_interval.included().to_string());
-        assert_eq!("(2, 4)", dbm2_interval.to_string());
+        assert_eq!("(3, <)", dbm2_interval.included().to_string());
+        assert_eq!("(1, 4)", dbm2_interval.to_string());
 
         dbm2.fit(&dbm1);
 
         let dbm1_interval = dbm1.interval();
-        assert_eq!("(1, <)", dbm1_interval.included().to_string());
-        assert_eq!("(2, 3)", dbm1_interval.to_string());
+        assert_eq!("(2, <)", dbm1_interval.included().to_string());
+        assert_eq!("(1, 3)", dbm1_interval.to_string());
 
         let dbm2_interval = dbm2.interval();
-        assert_eq!("(1, <)", dbm2_interval.included().to_string());
-        assert_eq!("(2, 3)", dbm2_interval.to_string());
+        assert_eq!("(2, <)", dbm2_interval.included().to_string());
+        assert_eq!("(1, 3)", dbm2_interval.to_string());
     }
 
     #[test]
@@ -1664,24 +1726,24 @@ mod tests {
     #[test]
     fn delayed_by() {
         let dbm1 = dbm1();
-        assert_eq!("(2, 3)", dbm1.interval().to_string());
+        assert_eq!("(1, 3)", dbm1.interval().to_string());
         let delayed_by = dbm1.delayed_by(&dbm1);
-        assert_eq!("[0, 1)", delayed_by.to_string());
+        assert_eq!("[0, 2)", delayed_by.to_string());
 
         let dbm2 = dbm2();
-        assert_eq!("(2, 4)", dbm2.interval().to_string());
+        assert_eq!("(1, 4)", dbm2.interval().to_string());
         let delayed_by = dbm2.delayed_by(&dbm2);
-        assert_eq!("[0, 2)", delayed_by.to_string());
+        assert_eq!("[0, 3)", delayed_by.to_string());
 
         let zero = DBM::zero(1);
         assert_eq!("[0, 0]", zero.interval().to_string());
         let delayed_by = zero.delayed_by(&dbm1);
-        assert_eq!("(2, 3)", delayed_by.to_string());
+        assert_eq!("(1, 3)", delayed_by.to_string());
 
         let universe = DBM::universe(1);
         assert_eq!("[0, ∞]", universe.interval().to_string());
         let delayed_by = universe.delayed_by(&dbm1);
-        assert_eq!("(2, 3)", delayed_by.to_string());
+        assert_eq!("(1, 3)", delayed_by.to_string());
 
         let delayed_by = zero.delayed_by(&zero);
         assert_eq!("[0, 0]", delayed_by.to_string());
@@ -1696,24 +1758,24 @@ mod tests {
         let mut dbm2 = dbm2();
 
         let delayed_by_1 = zero.delayed_by(&dbm1);
-        assert_eq!("(2, 3)", delayed_by_1.to_string());
+        assert_eq!("(1, 3)", delayed_by_1.to_string());
 
         let delayed_by_2 = zero.delayed_by(&dbm2);
-        assert_eq!("(2, 4)", delayed_by_2.to_string());
+        assert_eq!("(1, 4)", delayed_by_2.to_string());
 
         let intersection = delayed_by_1.intersection(&delayed_by_2).unwrap();
-        assert_eq!("(2, 3)", intersection.to_string());
+        assert_eq!("(1, 3)", intersection.to_string());
 
         let included = intersection.included();
-        assert_eq!("(1, <)", included.to_string());
+        assert_eq!("(2, <)", included.to_string());
 
         dbm1.delay_to(included);
         let delayed_by_1 = zero.delayed_by(&dbm1);
-        assert_eq!("(2, 3)", delayed_by_1.to_string());
+        assert_eq!("(1, 3)", delayed_by_1.to_string());
 
         dbm2.delay_to(included);
         let delayed_by_2 = zero.delayed_by(&dbm2);
-        assert_eq!("(2, 3)", delayed_by_2.to_string());
+        assert_eq!("(1, 3)", delayed_by_2.to_string());
     }
 
     #[test]
@@ -1819,5 +1881,56 @@ mod tests {
         incremental_federation = incremental_federation.subtract(&dbm4());
         assert!(!incremental_federation.includes_dbm(&dbm4()));
         incremental_federation.append(dbm4());
+    }
+
+    #[test]
+    fn simple_intervals() {
+        let mut closed_closed = DBM::zero(1);
+        closed_closed.set_lower(1, Relation::weak(-1));
+        closed_closed.set_upper(1, Relation::weak(4));
+        assert_eq!(
+            "-x ≤ -1 ∧ x ≤ 4",
+            closed_closed.fmt_conjunctions(&vec!["x"])
+        );
+        assert_eq!("[1, 4]", closed_closed.interval().to_string());
+
+        let mut closed_open = DBM::zero(1);
+        closed_open.set_lower(1, Relation::weak(-1));
+        closed_open.set_upper(1, Relation::strict(4));
+        assert_eq!("-x ≤ -1 ∧ x < 4", closed_open.fmt_conjunctions(&vec!["x"]));
+        assert_eq!("[1, 4)", closed_open.interval().to_string());
+
+        let mut open_closed = DBM::zero(1);
+        open_closed.set_lower(1, Relation::strict(-1));
+        open_closed.set_upper(1, Relation::weak(4));
+        assert_eq!("-x < -1 ∧ x ≤ 4", open_closed.fmt_conjunctions(&vec!["x"]));
+        assert_eq!("(1, 4]", open_closed.interval().to_string());
+
+        let mut open_open = DBM::zero(1);
+        open_open.set_lower(1, Relation::strict(-1));
+        open_open.set_upper(1, Relation::strict(4));
+        assert_eq!("-x < -1 ∧ x < 4", open_open.fmt_conjunctions(&vec!["x"]));
+        assert_eq!("(1, 4)", open_open.interval().to_string());
+    }
+
+    #[test]
+    fn clamp_inside_1() {
+        let mut dbm = DBM::universe(1);
+        dbm.set_lower(1, Relation::weak(-2));
+        assert_eq!("-x ≤ -2", dbm.fmt_conjunctions(&vec!["x"]));
+
+        let interval = Interval::new(Relation::strict(2), INFINITY);
+        dbm.clamp_inside(interval);
+        assert_eq!("-x < -2", dbm.fmt_conjunctions(&vec!["x"]));
+    }
+
+    #[test]
+    fn clamp_inside_2() {
+        let mut dbm = DBM::universe(1);
+        assert_eq!("-x ≤ 0", dbm.fmt_conjunctions(&vec!["x"]));
+
+        let interval = Interval::new(Relation::strict(2), INFINITY);
+        dbm.clamp_inside(interval);
+        assert_eq!("-x < -2", dbm.fmt_conjunctions(&vec!["x"]));
     }
 }

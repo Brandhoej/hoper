@@ -1,0 +1,153 @@
+
+running 1 test
+test automata::ecdar_university_test::tests::implementation_refines_specification ... FAILED
+
+successes:
+
+successes:
+
+failures:
+
+---- automata::ecdar_university_test::tests::implementation_refines_specification stdout ----
+Implementation location: ((0, 0), 0) -> ((0, 0), 0)
+Specification location: 0 -> 0
+intersection: [0, 2]
+Implementation location: ((0, 0), 0) -> ((0, 0), 0)
+Specification location: 0 -> 0
+intersection: (2, ∞]
+Implementation location: ((0, 0), 0) -> ((0, 0), 0)
+Specification location: 0 -> 0
+intersection: [2, 15]
+Implementation location: ((0, 0), 0) -> ((0, 0), 0)
+Specification location: 0 -> 0
+intersection: [15, ∞]
+Implementation location: ((0, 1), 0) -> ((0, 1), 0)
+Specification location: 2 -> 2
+intersection: [0, 2]
+Implementation location: ((0, 1), 0) -> ((0, 1), 0)
+Specification location: 2 -> 2
+intersection: [0, 2]
+Implementation location: ((0, 1), 0) -> ((0, 1), 0)
+Specification location: 2 -> 2
+intersection: [0, 2]
+Implementation location: ((0, 1), 0) -> ((0, 1), 0)
+Specification location: 1 -> 1
+intersection: [0, 2]
+Implementation location: ((0, 1), 0) -> ((0, 1), 0)
+Specification location: 1 -> 1
+intersection: [0, 2]
+Implementation location: ((0, 1), 0) -> ((0, 1), 0)
+Specification location: 1 -> 1
+intersection: [0, 2]
+Implementation location: ((0, 1), 0) -> ((0, 1), 0)
+Specification location: 1 -> 1
+intersection: [0, 2]
+Implementation location: ((0, 0), 3) -> ((0, 0), 3)
+Specification location: 0 -> 0
+intersection: [0, 2]
+Implementation location: ((0, 0), 3) -> ((0, 0), 3)
+Specification location: 0 -> 0
+intersection: (2, 8)
+Implementation location: ((0, 0), 3) -> ((0, 0), 3)
+Specification location: 0 -> 0
+intersection: [4, 8]
+Implementation location: ((0, 0), 3) -> ((0, 0), 3)
+Specification location: 0 -> 0
+intersection: [0, 8]
+Implementation location: ((0, 0), 1) -> ((0, 0), 1)
+Specification location: 0 -> 0
+intersection: [0, 2]
+Implementation location: ((0, 0), 1) -> ((0, 0), 1)
+Specification location: 0 -> 0
+intersection: (2, ∞]
+Implementation location: ((0, 0), 1) -> ((0, 0), 1)
+Specification location: 0 -> 0
+intersection: [0, ∞]
+Implementation location: ((0, 0), 1) -> ((0, 0), 1)
+Specification location: 0 -> 0
+intersection: [2, ∞]
+Implementation location: ((1, 3), 0) -> ((1, 3), 0)
+Specification location: 2 -> 2
+intersection: [0, 6]
+Implementation location: ((1, 3), 0) -> ((1, 3), 0)
+Specification location: 2 -> 2
+intersection: [0, 6]
+Implementation location: ((1, 3), 0) -> ((1, 3), 0)
+Specification location: 2 -> 2
+intersection: [4, 6]
+Implementation location: ((0, 1), 3) -> ((0, 1), 3)
+Specification location: 2 -> 2
+intersection: [0, 2]
+Implementation location: ((0, 1), 3) -> ((0, 1), 3)
+Specification location: 2 -> 2
+intersection: [0, 2]
+Implementation location: ((0, 1), 3) -> ((0, 1), 3)
+Specification location: 2 -> 2
+intersection: [0, 2]
+Implementation location: ((1, 3), 0) -> ((1, 3), 0)
+Specification location: 1 -> 1
+intersection: [0, 6]
+Implementation location: ((1, 3), 0) -> ((1, 3), 0)
+Specification location: 1 -> 1
+intersection: [0, 6]
+Implementation location: ((1, 3), 0) -> ((1, 3), 0)
+Specification location: 1 -> 1
+intersection: [0, 6]
+Implementation location: ((1, 3), 0) -> ((1, 3), 0)
+Specification location: 1 -> 1
+intersection: [4, 6]
+Implementation location: ((0, 1), 3) -> ((0, 1), 3)
+Specification location: 1 -> 1
+intersection: [0, 2]
+Implementation location: ((0, 1), 3) -> ((0, 1), 3)
+Specification location: 1 -> 1
+intersection: [0, 2]
+Implementation location: ((0, 1), 3) -> ((0, 1), 3)
+Specification location: 1 -> 1
+intersection: [0, 2]
+Implementation location: ((0, 1), 1) -> ((0, 1), 1)
+Specification location: 1 -> 1
+intersection: [0, 2]
+Implementation location: ((0, 1), 1) -> ((0, 1), 1)
+Specification location: 1 -> 1
+intersection: [0, 2]
+Implementation location: ((0, 1), 1) -> ((0, 1), 1)
+Specification location: 1 -> 1
+intersection: [0, 2]
+Implementation location: ((0, 1), 1) -> ((0, 1), 1)
+Specification location: 1 -> 1
+intersection: [0, 2]
+Implementation location: ((0, 1), 3) -> ((0, 1), 3)
+Specification location: 2 -> 2
+intersection: [0, 2]
+Implementation location: ((0, 1), 3) -> ((0, 1), 3)
+Specification location: 2 -> 2
+intersection: [0, 2]
+Implementation location: ((0, 1), 3) -> ((0, 1), 3)
+Specification location: 2 -> 2
+intersection: [2, 2]
+Implementation location: ((0, 1), 3) -> ((0, 1), 3)
+Specification location: 2 -> 2
+intersection: [0, 2]
+Implementation location: ((0, 1), 3) -> ((0, 1), 3)
+Specification location: 1 -> 1
+intersection: [0, 2]
+Implementation location: ((0, 1), 3) -> ((0, 1), 3)
+Specification location: 1 -> 1
+intersection: [0, 2]
+Implementation location: ((0, 1), 3) -> ((0, 1), 3)
+Specification location: 1 -> 1
+intersection: [0, 2]
+Implementation location: ((0, 1), 3) -> ((0, 1), 3)
+Specification location: 1 -> 1
+intersection: [0, 2]
+thread 'automata::ecdar_university_test::tests::implementation_refines_specification' panicked at src/automata/ecdar_university_test.rs:646:9:
+assertion failed: refinment.unwrap().refines().is_ok()
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    automata::ecdar_university_test::tests::implementation_refines_specification
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 121 filtered out; finished in 0.01s
+

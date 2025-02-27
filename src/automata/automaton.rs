@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
+use itertools::Itertools;
 use petgraph::{
+    dot::Dot,
     graph::{DiGraph, EdgeIndex, EdgeReference, NodeIndex},
     visit::EdgeRef,
     Direction::{Incoming, Outgoing},
@@ -217,11 +219,11 @@ impl TIOA for Automaton {
     fn outgoing_traversals(
         &self,
         source: &LocationTree,
-        action: Action,
+        channel: Channel,
     ) -> Result<Vec<Traversal>, ()> {
         if let LocationTree::Leaf(node) = source {
             Ok(self
-                .traversals(self.filter_by_action(self.outgoing(*node), action))
+                .traversals(self.filter_by_channel(self.outgoing(*node), channel))
                 .collect())
         } else {
             Err(())
@@ -275,8 +277,8 @@ impl<T: TIOA> IntoAutomaton for T {
                 .entry(source_tree.clone())
                 .or_insert_with(|| graph.add_node(from));
 
-            for action in self.actions() {
-                let traversals = self.outgoing_traversals(&source_tree, action).unwrap();
+            for channel in self.channels() {
+                let traversals = self.outgoing_traversals(&source_tree, channel).unwrap();
                 for traversal in traversals {
                     let destination_tree = traversal.destination().clone();
                     let to = self.location(&destination_tree).unwrap();
@@ -328,6 +330,13 @@ impl<'a> ContextualAutomaton<'a> {
         }
 
         graph
+    }
+
+    pub fn dot(&self) -> String {
+        let graph = self.graph();
+        let binding = vec![];
+        let dot = Dot::with_config(&graph, &binding);
+        dot.to_string()
     }
 }
 

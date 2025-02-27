@@ -9,7 +9,7 @@ use super::{action::Action, partitioned_symbol_table::PartitionedSymbolTable};
 /// through the displays of the automaton.
 ///
 /// TODO: Make channels value passing but doing what Go is doing (un/-buffered)
-#[derive(PartialEq, Clone, Debug)]
+#[derive(PartialEq, Eq, Hash, Clone, Copy, Debug)]
 pub enum Channel {
     In(Action),
     Out(Action),
@@ -17,12 +17,12 @@ pub enum Channel {
 
 impl Channel {
     /// Creates a new input channel with an action.
-    pub const fn new_in(action: Action) -> Self {
+    pub const fn new_input(action: Action) -> Self {
         Self::In(action)
     }
 
     /// Creates a new output channel with an action.
-    pub const fn new_out(action: Action) -> Self {
+    pub const fn new_output(action: Action) -> Self {
         Self::Out(action)
     }
 
@@ -70,6 +70,8 @@ impl<'a> Display for ContextualChannel<'a> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::{HashMap, HashSet};
+
     use crate::automata::{
         action::Action, channel::Channel, partitioned_symbol_table::PartitionedSymbolTable,
     };
@@ -82,15 +84,15 @@ mod tests {
 
         assert_ne!(a, b);
 
-        assert!(Channel::new_in(a).is_input());
-        assert!(!Channel::new_in(a).is_output());
-        assert!(!Channel::new_out(a).is_input());
-        assert!(Channel::new_out(a).is_output());
+        assert!(Channel::new_input(a).is_input());
+        assert!(!Channel::new_input(a).is_output());
+        assert!(!Channel::new_output(a).is_input());
+        assert!(Channel::new_output(a).is_output());
 
-        assert!(Channel::new_in(b).is_input());
-        assert!(!Channel::new_in(b).is_output());
-        assert!(!Channel::new_out(b).is_input());
-        assert!(Channel::new_out(b).is_output());
+        assert!(Channel::new_input(b).is_input());
+        assert!(!Channel::new_input(b).is_output());
+        assert!(!Channel::new_output(b).is_input());
+        assert!(Channel::new_output(b).is_output());
     }
 
     #[test]
@@ -101,8 +103,8 @@ mod tests {
 
         assert_ne!(a, b);
 
-        assert_eq!(*Channel::new_in(a).action(), a);
-        assert_eq!(*Channel::new_in(b).action(), b);
+        assert_eq!(*Channel::new_input(a).action(), a);
+        assert_eq!(*Channel::new_input(b).action(), b);
     }
 
     #[test]
@@ -113,22 +115,44 @@ mod tests {
 
         assert_ne!(a, b);
 
-        assert_eq!(*Channel::new_in(a).action(), a);
-        assert_eq!(*Channel::new_in(b).action(), b);
+        assert_eq!(*Channel::new_input(a).action(), a);
+        assert_eq!(*Channel::new_input(b).action(), b);
 
-        assert_eq!(Channel::new_in(a), Channel::new_in(a));
-        assert_eq!(Channel::new_in(b), Channel::new_in(b));
-        assert_ne!(Channel::new_in(a), Channel::new_in(b));
-        assert_ne!(Channel::new_in(b), Channel::new_in(a));
+        assert_eq!(Channel::new_input(a), Channel::new_input(a));
+        assert_eq!(Channel::new_input(b), Channel::new_input(b));
+        assert_ne!(Channel::new_input(a), Channel::new_input(b));
+        assert_ne!(Channel::new_input(b), Channel::new_input(a));
 
-        assert_eq!(Channel::new_out(a), Channel::new_out(a));
-        assert_eq!(Channel::new_out(b), Channel::new_out(b));
-        assert_ne!(Channel::new_out(a), Channel::new_out(b));
-        assert_ne!(Channel::new_out(b), Channel::new_out(a));
+        assert_eq!(Channel::new_output(a), Channel::new_output(a));
+        assert_eq!(Channel::new_output(b), Channel::new_output(b));
+        assert_ne!(Channel::new_output(a), Channel::new_output(b));
+        assert_ne!(Channel::new_output(b), Channel::new_output(a));
 
-        assert_ne!(Channel::new_out(a), Channel::new_in(a));
-        assert_ne!(Channel::new_out(b), Channel::new_in(b));
-        assert_ne!(Channel::new_in(a), Channel::new_out(a));
-        assert_ne!(Channel::new_in(b), Channel::new_out(b));
+        assert_ne!(Channel::new_output(a), Channel::new_input(a));
+        assert_ne!(Channel::new_output(b), Channel::new_input(b));
+        assert_ne!(Channel::new_input(a), Channel::new_output(a));
+        assert_ne!(Channel::new_input(b), Channel::new_output(b));
+    }
+
+    #[test]
+    fn test_contains() {
+        let symbols = PartitionedSymbolTable::new();
+        let a = Action::new(symbols.intern(0, "a"));
+        let b = Action::new(symbols.intern(0, "b"));
+        let c = Action::new(symbols.intern(0, "c"));
+        let d = Action::new(symbols.intern(0, "d"));
+
+        assert!(vec![a, b, c].contains(&a));
+        assert!(vec![a, b, c].contains(&b));
+        assert!(vec![a, b, c].contains(&c));
+        assert!(!vec![a, b, c].contains(&d));
+
+        let mut hashset = HashSet::new();
+        hashset.insert(a);
+        hashset.insert(b);
+        assert!(hashset.contains(&a));
+        assert!(hashset.contains(&b));
+        assert!(!hashset.contains(&c));
+        assert!(!hashset.contains(&d));
     }
 }

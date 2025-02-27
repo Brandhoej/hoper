@@ -30,15 +30,22 @@ impl<'a> AutomatonBuilder<'a> {
         }
     }
 
-    pub fn add_clock(&mut self, partition: u32, name: &str) -> PartitionedSymbol {
-        let symbol = self.symbols.intern(partition, name);
+    pub fn add_symbol(&mut self, partition: u32, string: &str) -> PartitionedSymbol {
+        self.symbols.intern(partition, string)
+    }
+
+    pub fn add_clock(&mut self, partition: u32, string: &str) -> PartitionedSymbol {
+        let symbol = self.add_symbol(partition, string);
         self.clocks.insert(symbol);
         symbol
     }
 
-    pub fn add_location(&mut self, partition: u32, name: &str, invariant: Expression) -> NodeIndex {
-        let symbol = self.symbols.intern(partition, name);
-        let location = Location::new(symbol, invariant);
+    pub fn add_location(
+        &mut self,
+        symbol: PartitionedSymbol,
+        invariant: Option<Expression>,
+    ) -> NodeIndex {
+        let location = Location::new(symbol, invariant.unwrap_or(Literal::new_true().into()));
         self.graph.add_node(location)
     }
 
@@ -46,16 +53,11 @@ impl<'a> AutomatonBuilder<'a> {
         self.initial = Some(location)
     }
 
-    pub fn add_location_with_name(&mut self, partition: u32, name: &str) -> NodeIndex {
-        self.add_location(partition, name, Literal::new_true().into())
-    }
-
     pub fn add_edge_input(
         &mut self,
-        partition: u32,
         source: NodeIndex,
         destination: NodeIndex,
-        name: &str,
+        symbol: PartitionedSymbol,
         mut guard: Option<Expression>,
         mut update: Option<Statement>,
     ) -> EdgeIndex {
@@ -67,7 +69,6 @@ impl<'a> AutomatonBuilder<'a> {
             update = Some(Statement::empty());
         }
 
-        let symbol = self.symbols.intern(partition, name);
         let action = Action::new(symbol);
         let edge = Edge::new_input(action, guard.unwrap(), update.unwrap());
         self.graph.add_edge(source, destination, edge)
@@ -75,10 +76,9 @@ impl<'a> AutomatonBuilder<'a> {
 
     pub fn add_edge_output(
         &mut self,
-        partition: u32,
         source: NodeIndex,
         destination: NodeIndex,
-        name: &str,
+        symbol: PartitionedSymbol,
         mut guard: Option<Expression>,
         mut update: Option<Statement>,
     ) -> EdgeIndex {
@@ -90,32 +90,9 @@ impl<'a> AutomatonBuilder<'a> {
             update = Some(Statement::empty());
         }
 
-        let symbol = self.symbols.intern(partition, name);
         let action = Action::new(symbol);
         let edge = Edge::new_output(action, guard.unwrap(), update.unwrap());
         self.graph.add_edge(source, destination, edge)
-    }
-
-    pub fn add_loop_input(
-        &mut self,
-        partition: u32,
-        node: NodeIndex,
-        name: &str,
-        guard: Option<Expression>,
-        update: Option<Statement>,
-    ) -> EdgeIndex {
-        self.add_edge_input(partition, node, node, name, guard, update)
-    }
-
-    pub fn add_loop_output(
-        &mut self,
-        partition: u32,
-        node: NodeIndex,
-        name: &str,
-        guard: Option<Expression>,
-        update: Option<Statement>,
-    ) -> EdgeIndex {
-        self.add_edge_output(partition, node, node, name, guard, update)
     }
 
     pub fn build(self) -> Result<Automaton, ()> {

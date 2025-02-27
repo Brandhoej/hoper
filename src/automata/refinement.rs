@@ -3,7 +3,7 @@ use std::collections::{HashSet, VecDeque};
 use itertools::Itertools;
 use petgraph::graph::NodeIndex;
 
-use crate::{automata::tiots::TIOTS, zones::intervals::Interval};
+use crate::automata::tiots::TIOTS;
 
 use super::{
     action::Action,
@@ -160,6 +160,24 @@ impl Refinement {
             return Err(());
         }
 
+        // FIXME: THESE ARE NOT SYNCHRONISED AND ALLOW DIFFERENT INITIAL DELAYS.
+        println!(
+            "{}",
+            implementation_state
+                .clone()
+                .unwrap()
+                .ref_zone()
+                .fmt_conjunctions(&vec!["x", "y"])
+        );
+        println!(
+            "{}",
+            specification_state
+                .clone()
+                .unwrap()
+                .ref_zone()
+                .fmt_conjunctions(&vec!["x", "y"])
+        );
+
         RefinementStatePair::from_states(
             implementation_state.unwrap(),
             specification_state.unwrap(),
@@ -187,21 +205,6 @@ impl Refinement {
                 implementation_passed.insert(initial.implementation());
                 specification_passed.insert(initial.specification());
 
-                /*implementation_computation_tree.decorate(
-                    implementation_computation_tree.root(),
-                    initial
-                        .implementation()
-                        .ref_zone()
-                        .fmt_conjunctions(&vec!["x", "y"]),
-                );
-                specification_computation_tree.decorate(
-                    specification_computation_tree.root(),
-                    initial
-                        .specification()
-                        .ref_zone()
-                        .fmt_conjunctions(&vec!["x", "y"]),
-                );*/
-
                 worklist.push_back((
                     implementation_computation_tree.root(),
                     specification_computation_tree.root(),
@@ -226,15 +229,16 @@ impl Refinement {
 
             // Rule 1 (Common inputs): Both the specification and implementaion can react on the input.
             // Whenever t -i?->ᵀ t' for some t' ∈ Qᵀ and i? ∈ Actᵀᵢ ∩ Actᔆᵢ , then s -i?->ᔆ s' and (s', t') ∈ R for some s' ∈ Qᔆ
-            for input in self.common_inputs.iter() {
+            for action in self.common_inputs.iter() {
+                let channel = action.input();
                 let mut specification_states = self
                     .specification
-                    .guards(&pair.specification(), input)
+                    .enabled(&pair.specification(), channel.clone())
                     .peekable();
 
                 let mut implementation_states = self
                     .implementation
-                    .guards(&pair.implementation(), input)
+                    .enabled(&pair.implementation(), channel.clone())
                     .peekable();
 
                 // I believe that since both are specifications then thet must both be input-enabled.
@@ -249,10 +253,11 @@ impl Refinement {
 
             // Rule 2 (Unique specification inputs): Only the specification reacts to the input.
             // Whenever t -i?->ᵀ t' for some t' ∈ Qᵀ and i? ∈ Actᵀᵢ \ Actᔆᵢ, then (s, t') ∈ R.
-            for input in self.unique_specification_inputs.iter() {
+            for action in self.unique_specification_inputs.iter() {
+                let channel = action.input();
                 let mut specification_states = self
                     .specification
-                    .guards(pair.specification(), input)
+                    .enabled(pair.specification(), channel)
                     .peekable();
 
                 // I believe that since both are specifications then thet must both be input-enabled.
@@ -273,10 +278,11 @@ impl Refinement {
 
             // Rule 3 (Common outputs): Both the specification and implementaion can produce the output.
             // Whenever s -o!->ᔆ s' for some s' ∈ Qᔆ and o! ∈ Actᵀₒ ∩ Actᔆₒ then t -o!->ᵀ t' and (s', t') ∈ R for some t' ∈ Qᵀ
-            for output in self.common_outputs.iter() {
+            for action in self.common_outputs.iter() {
+                let channel = action.output();
                 let mut implementation_states = self
                     .implementation
-                    .guards(pair.implementation(), output)
+                    .enabled(pair.implementation(), channel.clone())
                     .peekable();
 
                 // Only if the implementation can produce an output is it
@@ -288,7 +294,7 @@ impl Refinement {
                 // The specification should be able to produce the output since the implementation can.
                 let mut specification_states = self
                     .specification
-                    .guards(pair.specification(), output)
+                    .enabled(pair.specification(), channel.clone())
                     .peekable();
 
                 // The specification could not produce the output the implementation could.
@@ -309,10 +315,11 @@ impl Refinement {
 
             // Rule 4 (Unique implementation outputs): Only the implementation can produce the output.
             // Whenever s -o!->ᔆ s' for some s' ∈ Qᔆ and o! ∈ Actᵀₒ \ Actᔆₒ, then (s', t) ∈ R.
-            for output in self.unique_implementation_outputs.iter() {
+            for action in self.unique_implementation_outputs.iter() {
+                let channel = action.output();
                 let mut implementation_states = self
                     .implementation
-                    .guards(pair.implementation(), output)
+                    .enabled(pair.implementation(), channel.clone())
                     .peekable();
 
                 if implementation_states.peek().is_none() {
@@ -337,6 +344,33 @@ impl Refinement {
                     (mut specification_state, specification_traversal),
                 ) in product
                 {
+                    println!("");
+                    println!(
+                        "Implementation location: {} -{}-> {}",
+                        pair.implementation.location(),
+                        implementation_traversal.edge(),
+                        implementation_traversal.destination()
+                    );
+                    println!(
+                        "Specification location: {} -{}-> {}",
+                        pair.specification.location(),
+                        specification_traversal.edge(),
+                        specification_traversal.destination()
+                    );
+                    println!(
+                        "Before implementation: {}",
+                        pair.implementation
+                            .ref_zone()
+                            .fmt_conjunctions(&vec!["x", "y"])
+                    );
+                    println!(
+                        "Before specification: {}",
+                        pair.specification
+                            .ref_zone()
+                            .fmt_conjunctions(&vec!["x", "y"])
+                    );
+
+                    // Ensure that they are they are enabled at the same time.
                     let implementation_delay_by = pair
                         .implementation
                         .ref_zone()
@@ -346,39 +380,111 @@ impl Refinement {
                         .ref_zone()
                         .delayed_by(specification_state.ref_zone());
 
-                    // The adjusted intervals do not overlap. This means that the two edges were not enabled at the same time.
-                    let interval_intersection =
-                        implementation_delay_by.intersection(&specification_delay_by);
-                    match interval_intersection {
+                    match implementation_delay_by.intersection(&specification_delay_by) {
                         Some(intersection) => {
-                            // FIXME!!! I STRONGLY Believe this is buggy because it trims the last aspect.
-                            // However, it may be from left-to-right and right-to-left on different ones.
-                            specification_state
-                                .mut_zone()
-                                .delay_to(intersection.included());
-                            implementation_state
-                                .mut_zone()
-                                .delay_to(intersection.included());
+                            println!("Enabled intersection: {}", intersection);
+                            implementation_state.mut_zone().clamp_inside(intersection);
+                            specification_state.mut_zone().clamp_inside(intersection);
                         }
                         None => continue,
                     }
 
-                    // Perform the traversal of the edges (Implementation and specification):
+                    println!(
+                        "Enabled implementation: {}",
+                        implementation_state
+                            .ref_zone()
+                            .fmt_conjunctions(&vec!["x", "y"])
+                    );
+                    println!(
+                        "Enabled specification: {}",
+                        specification_state
+                            .ref_zone()
+                            .fmt_conjunctions(&vec!["x", "y"])
+                    );
+
+                    // Traverse
                     implementation_state = self
                         .implementation
-                        .update(implementation_state, &implementation_traversal)
+                        .traverse(implementation_state, &implementation_traversal)
                         .unwrap();
-                    implementation_state = self.implementation.delay(implementation_state).unwrap();
-
                     specification_state = self
                         .specification
-                        .update(specification_state, &specification_traversal)
+                        .traverse(specification_state, &specification_traversal)
                         .unwrap();
-                    specification_state = self.specification.delay(specification_state).unwrap();
+
+                    println!(
+                        "Traversed implementation: {}",
+                        implementation_state
+                            .ref_zone()
+                            .fmt_conjunctions(&vec!["x", "y"])
+                    );
+                    println!(
+                        "Traversed specification: {}",
+                        specification_state
+                            .ref_zone()
+                            .fmt_conjunctions(&vec!["x", "y"])
+                    );
+
+                    // Delay
+                    let mut final_implementation_state = self
+                        .implementation
+                        .delay(implementation_state.clone())
+                        .unwrap();
+                    let mut final_specification_state = self
+                        .specification
+                        .delay(specification_state.clone())
+                        .unwrap();
+
+                    println!(
+                        "Delayed implementation: {}",
+                        final_implementation_state
+                            .ref_zone()
+                            .fmt_conjunctions(&vec!["x", "y"])
+                    );
+                    println!(
+                        "Delayed specification: {}",
+                        final_specification_state
+                            .ref_zone()
+                            .fmt_conjunctions(&vec!["x", "y"])
+                    );
+
+                    // Ensure that they delay the same.
+                    let implementation_delay_by = implementation_state
+                        .ref_zone()
+                        .delayed_by(final_implementation_state.ref_zone());
+                    let specification_delay_by = specification_state
+                        .ref_zone()
+                        .delayed_by(final_specification_state.ref_zone());
+
+                    match implementation_delay_by.intersection(&specification_delay_by) {
+                        Some(intersection) => {
+                            println!("Delay intersection: {}", intersection);
+                            final_implementation_state
+                                .mut_zone()
+                                .clamp_inside(intersection);
+                            final_specification_state
+                                .mut_zone()
+                                .clamp_inside(intersection);
+                        }
+                        None => continue,
+                    }
+
+                    println!(
+                        "Adjusted by delay implementation: {}",
+                        final_implementation_state
+                            .ref_zone()
+                            .fmt_conjunctions(&vec!["x", "y"])
+                    );
+                    println!(
+                        "Adjusted by delay specification: {}",
+                        final_specification_state
+                            .ref_zone()
+                            .fmt_conjunctions(&vec!["x", "y"])
+                    );
 
                     match RefinementStatePair::from_states(
-                        implementation_state,
-                        specification_state,
+                        final_implementation_state,
+                        final_specification_state,
                     ) {
                         Ok(pair) => {
                             let mut visited = true;
@@ -399,19 +505,6 @@ impl Refinement {
                                 let destination_specification = specification_computation_tree
                                     .enqueue(source_specification, specification_traversal);
 
-                                /*implementation_computation_tree.decorate(
-                                    destination_implementation,
-                                    pair.implementation()
-                                        .ref_zone()
-                                        .fmt_conjunctions(&vec!["x", "y"]),
-                                );
-                                specification_computation_tree.decorate(
-                                    destination_specification,
-                                    pair.specification()
-                                        .ref_zone()
-                                        .fmt_conjunctions(&vec!["x", "y"]),
-                                );*/
-
                                 worklist.push_back((
                                     destination_implementation,
                                     destination_specification,
@@ -419,7 +512,6 @@ impl Refinement {
                                 ));
                             }
                         }
-                        // TODO: Shown in the counter-example what went wrong here.
                         Err(_) => {
                             let destination_implementation = implementation_computation_tree
                                 .enqueue(source_implementation, implementation_traversal);

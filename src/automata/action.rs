@@ -1,6 +1,7 @@
 use std::fmt::{self, Display};
 
 use super::{
+    channel::Channel,
     expressions::Expression,
     partitioned_symbol_table::{PartitionedSymbol, PartitionedSymbolTable},
 };
@@ -27,6 +28,14 @@ impl Action {
 
     pub fn in_context<'a>(&'a self, symbols: &'a PartitionedSymbolTable) -> ContextualAction<'a> {
         ContextualAction::new(symbols, self)
+    }
+
+    pub fn input(self) -> Channel {
+        Channel::new_input(self)
+    }
+
+    pub fn output(self) -> Channel {
+        Channel::new_output(self)
     }
 }
 

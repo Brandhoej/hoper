@@ -4,6 +4,7 @@ use crate::zones::constraint::Clock;
 
 use super::{
     action::Action,
+    channel::{self, Channel},
     edge::Edge,
     ioa::IOA,
     location::Location,
@@ -60,9 +61,9 @@ impl TIOA for Specification {
     fn outgoing_traversals(
         &self,
         source: &LocationTree,
-        action: Action,
+        channel: Channel,
     ) -> Result<Vec<Traversal>, ()> {
-        self.0.outgoing_traversals(source, action)
+        self.0.outgoing_traversals(source, channel)
     }
 
     fn location(&self, tree: &LocationTree) -> Result<Location, ()> {

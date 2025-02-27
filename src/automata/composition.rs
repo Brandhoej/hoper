@@ -117,16 +117,6 @@ impl Composition {
             rhs_unique_actions,
         })
     }
-
-    pub fn channel_for(&self, action: Action) -> Result<Channel, ()> {
-        if self.inputs.contains(&action) {
-            Ok(Channel::new_in(action))
-        } else if self.outputs.contains(&action) {
-            Ok(Channel::new_out(action))
-        } else {
-            Err(())
-        }
-    }
 }
 
 impl TA for Composition {
@@ -160,9 +150,9 @@ impl TIOA for Composition {
     fn outgoing_traversals(
         &self,
         source: &LocationTree,
-        action: Action,
+        channel: Channel,
     ) -> Result<Vec<Traversal>, ()> {
-        if !self.actions().contains(&action) {
+        if !self.channels().contains(&channel) {
             return Err(());
         }
 
@@ -177,17 +167,29 @@ impl TIOA for Composition {
             let mut lhs_traversals: Result<Vec<Traversal>, ()> = Err(());
             let mut rhs_traversals: Result<Vec<Traversal>, ()> = Err(());
 
-            if self.common_actions.contains(&action) {
-                lhs_traversals = self.lhs.outgoing_traversals(lhs_location, action);
-                rhs_traversals = self.rhs.outgoing_traversals(rhs_location, action);
-            } else if self.lhs_unique_actions.contains(&action) {
-                lhs_traversals = self.lhs.outgoing_traversals(lhs_location, action);
+            if self.common_actions.contains(channel.action()) {
+                lhs_traversals = self.lhs.outgoing_traversals(
+                    lhs_location,
+                    self.lhs.channel(*channel.action()).unwrap(),
+                );
+                rhs_traversals = self.rhs.outgoing_traversals(
+                    rhs_location,
+                    self.rhs.channel(*channel.action()).unwrap(),
+                );
+            } else if self.lhs_unique_actions.contains(channel.action()) {
+                lhs_traversals = self.lhs.outgoing_traversals(
+                    lhs_location,
+                    self.lhs.channel(*channel.action()).unwrap(),
+                );
                 let stay = Traversal::stay(rhs_location.clone());
                 rhs_traversals = Ok(vec![stay]);
-            } else if self.rhs_unique_actions.contains(&action) {
+            } else if self.rhs_unique_actions.contains(channel.action()) {
                 let stay = Traversal::stay(lhs_location.clone());
                 lhs_traversals = Ok(vec![stay]);
-                rhs_traversals = self.rhs.outgoing_traversals(rhs_location, action);
+                rhs_traversals = self.rhs.outgoing_traversals(
+                    rhs_location,
+                    self.rhs.channel(*channel.action()).unwrap(),
+                );
             } else {
                 unreachable!()
             }
@@ -197,7 +199,6 @@ impl TIOA for Composition {
             }
 
             let combinations: Vec<Traversal> = Traversal::combinations(
-                self.channel_for(action).unwrap(),
                 vec![
                     lhs_traversals.unwrap().into_iter(),
                     rhs_traversals.unwrap().into_iter(),
@@ -237,21 +238,21 @@ impl TIOA for Composition {
                 }
 
                 let mut edge_composition: Vec<Edge> = Vec::with_capacity(2);
-                let mut channel: Option<Channel> = None;
+                let mut action: Option<Action> = None;
 
                 if !edges[0].is_identity() {
                     let lhs_edge = self.lhs.edge(&edges[0])?;
                     edge_composition.push(lhs_edge.clone());
-                    channel = Some(lhs_edge.channel().clone());
+                    action = Some(lhs_edge.action().clone());
                 }
 
                 if !edges[1].is_identity() {
                     let rhs_edge = self.rhs.edge(&edges[1])?;
                     edge_composition.push(rhs_edge.clone());
-                    channel = Some(rhs_edge.channel().clone());
+                    action = Some(rhs_edge.action().clone());
                 }
 
-                return if let Some(channel) = channel {
+                return if let Some(channel) = self.channel(action.unwrap()) {
                     Ok(Edge::conjoin(channel, edge_composition).ok().unwrap())
                 } else {
                     Err(())

@@ -75,25 +75,7 @@ impl Extrapolator {
                     self.stack.push(Literal::new_true());
                     lhs_bounds.tighten_all(rhs_bounds.into_iter())
                 }
-                Binary::Disjunction => {
-                    let lhs_bounds = self.bounds(bounds.clone(), state, lhs);
-                    let lhs_bool = self.stack.pop().unwrap().boolean().unwrap();
-
-                    let rhs_bounds = self.bounds(bounds.clone(), state, rhs);
-                    let rhs_bool = self.stack.pop().unwrap().boolean().unwrap();
-
-                    self.stack.push(Literal::new_boolean(lhs_bool || rhs_bool));
-
-                    return if lhs_bool && rhs_bool {
-                        lhs_bounds.loosen_all(rhs_bounds.into_iter())
-                    } else if lhs_bool {
-                        lhs_bounds
-                    } else if rhs_bool {
-                        rhs_bounds
-                    } else {
-                        Bounds::new()
-                    };
-                }
+                Binary::Disjunction => todo!(),
             },
             Expression::Group(expression) => self.bounds(bounds, state, expression),
             Expression::Literal(literal) => {

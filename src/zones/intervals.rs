@@ -54,35 +54,43 @@ impl Interval {
     }
 
     pub fn intersection(&self, other: &Self) -> Option<Self> {
-        let lower_limit = self.lower.limit().max(other.lower.limit());
-        let upper_limit = self.upper.limit().min(other.upper.limit());
+        let lower_limit = self.lower.max(other.lower);
+        let upper_limit = self.upper.min(other.upper);
 
-        let lower_strictness = if self.lower.limit() == other.lower.limit() {
+        let lower_strictness = if self.lower.equal_limit(&other.lower()) {
             self.lower.strictness().min(other.lower.strictness())
         } else {
-            if self.lower.limit() > other.lower.limit() {
+            if self.lower.greater_limit(&other.lower) {
                 self.lower.strictness()
             } else {
                 other.lower.strictness()
             }
         };
 
-        let upper_strictness = if self.upper.limit() == other.upper.limit() {
+        let upper_strictness = if self.upper.equal_limit(&other.upper()) {
             self.upper.strictness().min(other.upper.strictness())
         } else {
-            if self.upper.limit() > other.upper.limit() {
+            if self.upper.greater_limit(&other.upper) {
                 other.upper.strictness()
             } else {
                 self.upper.strictness()
             }
         };
 
-        let lower_relation = Relation::new(lower_limit, lower_strictness);
-        let upper_relation = Relation::new(upper_limit, upper_strictness);
+        let lower_relation = if lower_limit.is_infinity() {
+            lower_limit
+        } else {
+            Relation::new(lower_limit.limit(), lower_strictness)
+        };
+        let upper_relation = if upper_limit.is_infinity() {
+            upper_limit
+        } else {
+            Relation::new(upper_limit.limit(), upper_strictness)
+        };
 
         if lower_relation > upper_relation
             || upper_relation < lower_relation
-            || (lower_relation.limit() == upper_relation.limit()
+            || (lower_relation.equal_limit(&upper_relation)
                 && (lower_relation.is_strict() || upper_relation.is_strict()))
         {
             return None;
