@@ -3,18 +3,14 @@ mod tests {
     use itertools::Itertools;
 
     use crate::automata::{
-        action::Action,
-        automaton::{Automaton, IntoAutomaton},
+        automaton::Automaton,
         automaton_builder::AutomatonBuilder,
         composition::Composition,
         expressions::{Comparison, Expression},
         input_enabled::InputEnabled,
-        ioa::IOA,
-        literal::Literal,
         partitioned_symbol_table::PartitionedSymbolTable,
         refinement::Refinement,
         statements::Statement,
-        ta::TA,
     };
 
     fn new_specification(symbols: &mut PartitionedSymbolTable) -> Automaton {
@@ -29,295 +25,248 @@ mod tests {
         let loc1_symbol = builder.add_symbol(1, "1");
         let loc2_symbol = builder.add_symbol(1, "2");
 
+        // Build
+        let reset_u = Statement::reset(clock, 0);
+        let u_greater_than_2 =
+            Expression::new_clock_constraint(clock.into(), Comparison::GreaterThan, 2.into());
+        let u_less_than_or_equal_2 =
+            Expression::new_clock_constraint(clock.into(), Comparison::LessThanOrEqual, 2.into());
+        let u_less_than_or_equal_20 =
+            Expression::new_clock_constraint(clock.into(), Comparison::LessThanOrEqual, 20.into());
+
         let loc0 = builder.add_location(loc0_symbol, None);
         let loc1 = builder.add_location(loc1_symbol, None);
-        let loc2 = builder.add_location(
-            loc2_symbol,
-            // u <= 20
-            Some(Expression::new_clock_constraint(
-                clock.into(),
-                Comparison::LessThanOrEqual,
-                20.into(),
-            )),
-        );
+        let loc2 = builder.add_location(loc2_symbol, Some(u_less_than_or_equal_20.clone()));
         builder.set_initial_location(loc0);
 
         builder.add_edge_input(loc1, loc1, grant, None, None);
         builder.add_edge_output(loc1, loc1, news, None, None);
-        builder.add_edge_input(
-            loc0,
-            loc1,
-            grant,
-            Some(Expression::new_clock_constraint(
-                clock.into(),
-                Comparison::GreaterThan,
-                2.into(),
-            )),
-            None,
-        );
-
+        builder.add_edge_input(loc0, loc1, grant, Some(u_greater_than_2.clone()), None);
         builder.add_edge_input(
             loc0,
             loc2,
             grant,
-            Some(Expression::new_clock_constraint(
-                clock.into(),
-                Comparison::LessThanOrEqual,
-                2.into(),
-            )),
-            Some(Statement::reset(clock.into(), 0)),
+            Some(u_less_than_or_equal_2.clone()),
+            Some(reset_u.clone()),
         );
-
-        builder.add_edge_output(
-            loc2,
-            loc0,
-            news,
-            None,
-            Some(Statement::reset(clock.into(), 0)),
-        );
-
+        builder.add_edge_output(loc2, loc0, news, None, Some(reset_u.clone()));
         builder.add_edge_input(loc2, loc2, grant, None, None);
 
         builder.build().unwrap()
     }
 
-    /*fn new_administration(symbols: &mut PartitionedSymbolTable) -> Automaton {
-        let global = 0;
-        let partition = 2;
+    fn new_administration(symbols: &mut PartitionedSymbolTable) -> Automaton {
         let mut builder = AutomatonBuilder::new(symbols);
-        let clock = builder.add_clock(partition, "z");
+        // Global declarations:
+        let grant = builder.add_symbol(0, "grant");
+        let news = builder.add_symbol(0, "news");
+        let publication = builder.add_symbol(0, "publication");
+        let coin = builder.add_symbol(0, "coin");
 
-        let loc0 = builder.add_location_with_name(partition, "0");
-        let loc1 = builder.add_location(
-            partition,
-            "1",
-            Expression::new_clock_constraint(clock.into(), Comparison::LessThanOrEqual, 2.into()),
-        );
-        let loc2 = builder.add_location(
-            partition,
-            "2",
-            Expression::new_clock_constraint(clock.into(), Comparison::LessThanOrEqual, 2.into()),
-        );
-        let loc3 = builder.add_location_with_name(partition, "3");
+        // Local declarations:
+        let clock = builder.add_clock(2, "z");
+        let loc0_symbol = builder.add_symbol(2, "0");
+        let loc1_symbol = builder.add_symbol(2, "1");
+        let loc2_symbol = builder.add_symbol(2, "2");
+        let loc3_symbol = builder.add_symbol(2, "3");
+
+        // Build
+        let reset_z = Statement::reset(clock, 0);
+        let z_less_than_2 =
+            Expression::new_clock_constraint(clock.into(), Comparison::LessThan, 2.into());
+
+        let loc0 = builder.add_location(loc0_symbol, None);
+        let loc1 = builder.add_location(loc1_symbol, Some(z_less_than_2.clone()));
+        let loc2 = builder.add_location(loc2_symbol, Some(z_less_than_2.clone()));
+        let loc3 = builder.add_location(loc3_symbol, None);
         builder.set_initial_location(loc0);
 
-        // if grant? then z := 0
-        builder.add_edge_input(
-            global,
-            loc0,
-            loc1,
-            "grant",
-            None,
-            Some(Statement::Reset(clock.into(), 0)),
-        );
-
-        // grant?, pub?
-        builder.add_loop_input(global, loc1, "grant", None, None);
-        builder.add_loop_input(global, loc1, "publication", None, None);
-
-        // if pub? then z := 0
-        builder.add_edge_input(
-            global,
-            loc0,
-            loc2,
-            "publication",
-            None,
-            Some(Statement::Reset(clock.into(), 0)),
-        );
-
-        // news!
-        builder.add_edge_output(global, loc2, loc0, "news", None, None);
-
-        // grant?, pub?
-        builder.add_loop_input(global, loc2, "grant", None, None);
-        builder.add_loop_input(global, loc2, "publication", None, None);
-
-        // coin!
-        builder.add_edge_output(global, loc1, loc3, "coin", None, None);
-
-        // grant?
-        builder.add_loop_input(global, loc3, "grant", None, None);
-
-        // if pub? then z := 0
-        builder.add_edge_input(
-            global,
-            loc3,
-            loc2,
-            "publication",
-            None,
-            Some(Statement::Reset(clock.into(), 0)),
-        );
+        builder.add_edge_input(loc0, loc1, grant, None, Some(reset_z.clone()));
+        builder.add_edge_input(loc1, loc1, grant, None, None);
+        builder.add_edge_input(loc1, loc1, publication, None, None);
+        builder.add_edge_output(loc1, loc3, coin, None, None);
+        builder.add_edge_input(loc3, loc3, grant, None, None);
+        builder.add_edge_input(loc3, loc2, publication, None, Some(reset_z.clone()));
+        builder.add_edge_input(loc2, loc2, grant, None, None);
+        builder.add_edge_input(loc2, loc2, publication, None, None);
+        builder.add_edge_input(loc0, loc2, publication, None, Some(reset_z));
+        builder.add_edge_output(loc2, loc0, news, None, None);
 
         builder.build().unwrap()
     }
 
     fn new_machine(symbols: &mut PartitionedSymbolTable) -> Automaton {
-        let global = 0;
-        let partition = 3;
         let mut builder = AutomatonBuilder::new(symbols);
-        let clock = builder.add_clock(partition, "y");
+        // Global declarations:
+        let tea = builder.add_symbol(0, "tea");
+        let coffee = builder.add_symbol(0, "coffee");
+        let coin = builder.add_symbol(0, "coin");
 
-        let loc0 = builder.add_location_with_name(partition, "0");
-        let loc1 = builder.add_location(
-            partition,
-            "1",
-            Expression::new_clock_constraint(clock.into(), Comparison::LessThanOrEqual, 6.into()),
+        // Local declarations:
+        let clock = builder.add_clock(3, "y");
+        let loc0_symbol = builder.add_symbol(3, "0");
+        let loc1_symbol = builder.add_symbol(3, "1");
+
+        // Build
+        let reset_y = Statement::reset(clock, 0);
+        let y_less_than_or_equal_6 =
+            Expression::new_clock_constraint(clock.into(), Comparison::LessThan, 6.into());
+        let y_greater_than_or_equal_4 = Expression::new_clock_constraint(
+            clock.into(),
+            Comparison::GreaterThanOrEqual,
+            4.into(),
+        );
+        let y_greater_than_or_equal_2 = Expression::new_clock_constraint(
+            clock.into(),
+            Comparison::GreaterThanOrEqual,
+            2.into(),
         );
 
+        let loc0 = builder.add_location(loc0_symbol, None);
+        let loc1 = builder.add_location(loc1_symbol, Some(y_less_than_or_equal_6));
         builder.set_initial_location(loc0);
 
-        // coin?
-        builder.add_edge_input(global, loc1, loc1, "coin", None, None);
-
-        // tea!
-        builder.add_edge_output(global, loc1, loc0, "tea", None, None);
-
-        // if y >= 4 then coffee!
         builder.add_edge_output(
-            global,
-            loc1,
             loc0,
-            "coffee",
-            Some(Expression::new_clock_constraint(
-                clock.into(),
-                Comparison::GreaterThanOrEqual,
-                4.into(),
-            )),
+            loc0,
+            tea,
+            Some(y_greater_than_or_equal_2.clone()),
             None,
         );
-
-        // if y >= 2 then tea!
-        builder.add_loop_output(
-            global,
-            loc0,
-            "tea",
-            Some(Expression::new_clock_constraint(
-                clock.into(),
-                Comparison::GreaterThanOrEqual,
-                2.into(),
-            )),
-            None,
-        );
-
-        // when coin? then y := 0
-        builder.add_edge_input(
-            global,
-            loc0,
+        builder.add_edge_input(loc0, loc1, coin, None, Some(reset_y.clone()));
+        builder.add_edge_output(loc1, loc0, tea, None, None);
+        builder.add_edge_input(loc1, loc1, coin, None, None);
+        builder.add_edge_output(
             loc1,
-            "coin",
+            loc0,
+            coffee,
+            Some(y_greater_than_or_equal_4.clone()),
             None,
-            Some(Statement::Reset(clock, 0)),
         );
 
         builder.build().unwrap()
     }
 
-    fn new_researcher(symbols: &mut PartitionedSymbolTable) -> Automaton {
-        let global = 0;
-        let local = 4;
+    pub fn new_machine_specification(symbols: &mut PartitionedSymbolTable) -> Automaton {
         let mut builder = AutomatonBuilder::new(symbols);
-        let clock = builder.add_clock(local, "x");
+        // Global declarations:
+        let tea = builder.add_symbol(0, "tea");
+        let coffee = builder.add_symbol(0, "coffee");
+        let coin = builder.add_symbol(0, "coin");
 
-        let loc0 = builder.add_location_with_name(local, "0");
-        let loc1 = builder.add_location_with_name(local, "1");
-        let loc2 = builder.add_location(
-            local,
-            "2",
-            Expression::new_clock_constraint(clock.into(), Comparison::LessThanOrEqual, 4.into()),
+        // Local declarations:
+        let clock = builder.add_clock(4, "y");
+        let loc0_symbol = builder.add_symbol(4, "0");
+        let loc1_symbol = builder.add_symbol(4, "1");
+
+        // Build
+        let reset_y = Statement::reset(clock, 0);
+        let y_less_than_or_equal_5 =
+            Expression::new_clock_constraint(clock.into(), Comparison::LessThanOrEqual, 5.into());
+        let y_greater_than_or_equal_4 = Expression::new_clock_constraint(
+            clock.into(),
+            Comparison::GreaterThanOrEqual,
+            4.into(),
         );
-        let loc3 = builder.add_location(
-            local,
-            "3",
-            Expression::new_clock_constraint(clock.into(), Comparison::LessThanOrEqual, 8.into()),
+        let y_greater_than_or_equal_2 = Expression::new_clock_constraint(
+            clock.into(),
+            Comparison::GreaterThanOrEqual,
+            2.into(),
         );
+
+        let loc0 = builder.add_location(loc0_symbol, None);
+        let loc1 = builder.add_location(loc1_symbol, Some(y_less_than_or_equal_5));
         builder.set_initial_location(loc0);
 
-        // if tea? and x > 15
-        builder.add_edge_input(
-            global,
-            loc0,
-            loc1,
-            "tea",
-            Some(Expression::new_clock_constraint(
-                clock.into(),
-                Comparison::GreaterThan,
-                15.into(),
-            )),
-            None,
-        );
-
-        // coffee?, tea?, pub!
-        builder.add_loop_input(global, loc1, "coffee", None, None);
-        builder.add_loop_input(global, loc1, "tea", None, None);
-        builder.add_loop_output(global, loc1, "publication", None, None);
-
-        // coffee?, tea?
-        builder.add_loop_input(global, loc2, "coffee", None, None);
-        builder.add_loop_input(global, loc2, "tea", None, None);
-
-        // coffee?, tea?
-        builder.add_loop_input(global, loc3, "coffee", None, None);
-        builder.add_loop_input(global, loc3, "tea", None, None);
-
-        // if coffee? then x := 0
-        builder.add_edge_input(
-            global,
-            loc0,
-            loc2,
-            "coffee",
-            None,
-            Some(Statement::reset(clock, 0)),
-        );
-
-        // if x >= 2 when pub! then x := 0
-        builder.add_edge_output(
-            global,
-            loc2,
-            loc0,
-            "publication",
-            Some(Expression::new_clock_constraint(
-                clock.into(),
-                Comparison::GreaterThanOrEqual,
-                2.into(),
-            )),
-            Some(Statement::reset(clock, 0)),
-        );
-
-        // if x 1= 15 when tea? then x := 0
-        builder.add_edge_input(
-            global,
-            loc0,
-            loc3,
-            "tea",
-            Some(Expression::new_clock_constraint(
-                clock.into(),
-                Comparison::LessThanOrEqual,
-                15.into(),
-            )),
-            Some(Statement::reset(clock, 0)),
-        );
-
-        // if x >= 4 when pub! thn x := 0
-        builder.add_edge_output(
-            global,
-            loc3,
-            loc0,
-            "publication",
-            Some(Expression::new_clock_constraint(
-                clock.into(),
-                Comparison::GreaterThanOrEqual,
-                4.into(),
-            )),
-            Some(Statement::reset(clock, 0)),
-        );
+        builder.add_edge_output(loc0, loc0, tea, Some(y_greater_than_or_equal_2), None);
+        builder.add_edge_input(loc0, loc1, coin, None, Some(reset_y));
+        builder.add_edge_input(loc1, loc1, coin, None, None);
+        builder.add_edge_output(loc1, loc0, coffee, Some(y_greater_than_or_equal_4), None);
 
         builder.build().unwrap()
-    }*/
+    }
+
+    pub fn new_researcher(symbols: &mut PartitionedSymbolTable) -> Automaton {
+        let mut builder = AutomatonBuilder::new(symbols);
+        // Global declarations:
+        let tea = builder.add_symbol(0, "tea");
+        let coffee = builder.add_symbol(0, "coffee");
+        let publication = builder.add_symbol(0, "publication");
+
+        // Local declarations:
+        let clock = builder.add_clock(5, "x");
+        let loc0_symbol = builder.add_symbol(5, "0");
+        let loc1_symbol = builder.add_symbol(5, "1");
+        let loc2_symbol = builder.add_symbol(5, "2");
+        let loc3_symbol = builder.add_symbol(5, "3");
+
+        // Build
+        let reset_x = Statement::reset(clock, 0);
+        let x_greater_than_or_equal_2 = Expression::new_clock_constraint(
+            clock.into(),
+            Comparison::GreaterThanOrEqual,
+            2.into(),
+        );
+        let x_greater_than_or_equal_4 = Expression::new_clock_constraint(
+            clock.into(),
+            Comparison::GreaterThanOrEqual,
+            4.into(),
+        );
+        let x_less_than_or_equal_4 = Expression::new_clock_constraint(
+            clock.into(),
+            Comparison::LessThanOrEqual,
+            4.into(),
+        );
+        let x_less_than_or_equal_8 = Expression::new_clock_constraint(
+            clock.into(),
+            Comparison::LessThanOrEqual,
+            8.into(),
+        );
+        let x_less_than_or_equal_15 = Expression::new_clock_constraint(
+            clock.into(),
+            Comparison::LessThanOrEqual,
+            15.into(),
+        );
+        let x_greater_than_15 = Expression::new_clock_constraint(
+            clock.into(),
+            Comparison::GreaterThan,
+            15.into(),
+        );
+
+        let loc0 = builder.add_location(loc0_symbol, None);
+        let loc1 = builder.add_location(loc1_symbol, None);
+        let loc2 = builder.add_location(loc2_symbol, Some(x_less_than_or_equal_4));
+        let loc3 = builder.add_location(loc3_symbol, Some(x_less_than_or_equal_8));
+        builder.set_initial_location(loc0);
+
+        builder.add_edge_input(loc0, loc1, tea, Some(x_greater_than_15), None);
+
+        builder.add_edge_input(loc0, loc2, coffee, None, Some(reset_x.clone()));
+        builder.add_edge_output(loc2, loc0, publication, Some(x_greater_than_or_equal_2), Some(reset_x.clone()));
+
+        builder.add_edge_input(loc0, loc3, tea, Some(x_less_than_or_equal_15), Some(reset_x.clone()));
+        builder.add_edge_output(loc3, loc0, publication, Some(x_greater_than_or_equal_4), Some(reset_x.clone()));
+        
+        builder.add_edge_input(loc1, loc1, coffee, None, None);
+        builder.add_edge_input(loc1, loc1, tea, None, None);
+        builder.add_edge_output(loc1, loc1, publication, None, None);
+        
+        builder.add_edge_input(loc2, loc2, coffee, None, None);
+        builder.add_edge_input(loc2, loc2, tea, None, None);
+        
+        builder.add_edge_input(loc3, loc3, coffee, None, None);
+        builder.add_edge_input(loc3, loc3, tea, None, None);
+
+        builder.build().unwrap()
+    }
 
     #[test]
     fn specification() {
         let mut symbols = PartitionedSymbolTable::new();
         let specification = new_specification(&mut symbols);
+
+        /*let contextual_automaton = specification.in_context(&symbols);
+        println!("{}", contextual_automaton.dot());*/
 
         assert_eq!(specification.inputs().try_len().unwrap(), 1);
         assert_eq!(specification.outputs().try_len().unwrap(), 1);
@@ -325,10 +274,13 @@ mod tests {
         assert_eq!(specification.edge_iter().try_len().unwrap(), 6);
     }
 
-    /*#[test]
+    #[test]
     fn administration() {
         let mut symbols = PartitionedSymbolTable::new();
         let administration = new_administration(&mut symbols);
+
+        /*let contextual_automaton = administration.in_context(&symbols);
+        println!("{}", contextual_automaton.dot());*/
 
         assert_eq!(administration.inputs().try_len().unwrap(), 2);
         assert_eq!(administration.outputs().try_len().unwrap(), 2);
@@ -341,6 +293,9 @@ mod tests {
         let mut symbols = PartitionedSymbolTable::new();
         let machine = new_machine(&mut symbols);
 
+        /*let contextual_automaton = machine.in_context(&symbols);
+        println!("{}", contextual_automaton.dot());*/
+
         assert_eq!(machine.inputs().try_len().unwrap(), 1);
         assert_eq!(machine.outputs().try_len().unwrap(), 2);
         assert_eq!(machine.node_iter().try_len().unwrap(), 2);
@@ -348,111 +303,32 @@ mod tests {
     }
 
     #[test]
+    fn machine_specification() {
+        let mut symbols = PartitionedSymbolTable::new();
+        let machine_specification = new_machine_specification(&mut symbols);
+
+        /*let contextual_automaton = machine_specification.in_context(&symbols);
+        println!("{}", contextual_automaton.dot());*/
+
+        assert_eq!(machine_specification.inputs().try_len().unwrap(), 1);
+        assert_eq!(machine_specification.outputs().try_len().unwrap(), 2);
+        assert_eq!(machine_specification.node_iter().try_len().unwrap(), 2);
+        assert_eq!(machine_specification.edge_iter().try_len().unwrap(), 4);
+    }
+
+    #[test]
     fn researcher() {
         let mut symbols = PartitionedSymbolTable::new();
         let researcher = new_researcher(&mut symbols);
+
+        /*let contextual_automaton = researcher.in_context(&symbols);
+        println!("{}", contextual_automaton.dot());*/
 
         assert_eq!(researcher.inputs().try_len().unwrap(), 2);
         assert_eq!(researcher.outputs().try_len().unwrap(), 1);
         assert_eq!(researcher.node_iter().try_len().unwrap(), 4);
         assert_eq!(researcher.edge_iter().try_len().unwrap(), 12);
-
-        let automaton = researcher.clone().into_automaton().unwrap();
-        let contextual_automaton = automaton.in_context(&symbols);
-        println!("{}", contextual_automaton.dot());
     }
-
-    #[test]
-    fn machine_researcher_composition() {
-        let mut symbols = PartitionedSymbolTable::new();
-        let machine = new_machine(&mut symbols);
-        let researcher = new_researcher(&mut symbols);
-
-        let contextual_automaton = machine.in_context(&symbols);
-        println!("{}", contextual_automaton.dot());
-        let contextual_automaton = researcher.in_context(&symbols);
-        println!("{}", contextual_automaton.dot());
-
-        let composition = Composition::new(
-            machine.clone().is_input_enabled().unwrap(),
-            researcher.clone().is_input_enabled().unwrap(),
-        )
-        .unwrap();
-
-        let coin = Action::new(symbols.intern(0, "coin"));
-        let coffee = Action::new(symbols.intern(0, "coffee"));
-        let tea = Action::new(symbols.intern(0, "tea"));
-        let publication = Action::new(symbols.intern(0, "publication"));
-        assert!(composition.inputs().contains(&coin));
-        assert!(composition.outputs().contains(&coffee));
-        assert!(composition.outputs().contains(&tea));
-        assert!(composition.outputs().contains(&publication));
-        assert_eq!(4, composition.channels().len());
-        assert!(composition.channels().contains(&coin.input()));
-        assert!(composition.channels().contains(&coffee.output()));
-        assert!(composition.channels().contains(&tea.output()));
-        assert!(composition.channels().contains(&publication.output()));
-
-        assert_eq!(composition.inputs().len(), 1);
-        assert_eq!(composition.outputs().len(), 3);
-        assert_eq!(composition.clock_count(), 2);
-
-        let automaton = composition.clone().into_automaton().unwrap();
-        let contextual_automaton = automaton.in_context(&symbols);
-        println!("{}", contextual_automaton.dot());
-
-        assert_eq!(automaton.node_iter().try_len().unwrap(), 8);
-        assert_eq!(automaton.edge_iter().try_len().unwrap(), 28); // Q: Should it be 29?
-    }
-
-    #[test]
-    fn machine_researcher_administration_composition() {
-        let mut symbols = PartitionedSymbolTable::new();
-        let machine = new_machine(&mut symbols);
-        let researcher = new_researcher(&mut symbols);
-        let administration = new_administration(&mut symbols);
-
-        let machine_administration = Composition::new(
-            machine.is_input_enabled().unwrap(),
-            administration.is_input_enabled().unwrap(),
-        )
-        .unwrap();
-        let machine_administration_researcher = Composition::new(
-            Box::new(machine_administration.into()),
-            researcher.is_input_enabled().unwrap(),
-        )
-        .unwrap();
-
-        let coin = Action::new(symbols.intern(0, "coin"));
-        let coffee = Action::new(symbols.intern(0, "coffee"));
-        let tea = Action::new(symbols.intern(0, "tea"));
-        let publication = Action::new(symbols.intern(0, "publication"));
-        let news = Action::new(symbols.intern(0, "news"));
-        let grant = Action::new(symbols.intern(0, "grant"));
-
-        assert!(machine_administration_researcher.inputs().contains(&grant));
-        assert!(machine_administration_researcher.outputs().contains(&news));
-        assert!(machine_administration_researcher.outputs().contains(&coin));
-        assert!(machine_administration_researcher
-            .outputs()
-            .contains(&coffee));
-        assert!(machine_administration_researcher.outputs().contains(&tea));
-        assert!(machine_administration_researcher
-            .outputs()
-            .contains(&publication));
-
-        assert_eq!(machine_administration_researcher.inputs().len(), 1);
-        assert_eq!(machine_administration_researcher.outputs().len(), 5);
-        assert_eq!(machine_administration_researcher.clock_count(), 3);
-
-        let automaton = machine_administration_researcher
-            .clone()
-            .into_automaton()
-            .unwrap();
-
-        assert_eq!(automaton.node_iter().try_len().unwrap(), 25);
-        assert_eq!(automaton.edge_iter().try_len().unwrap(), 97);
-    }*/
 
     #[test]
     fn specification_refines_self() {
@@ -464,187 +340,215 @@ mod tests {
             specification.clone().is_input_enabled().unwrap(),
         );
 
-        let automaton = specification.clone().into_automaton().unwrap();
-        let contextual_automaton = automaton.in_context(&symbols);
-        println!("{}", contextual_automaton.dot());
-
         assert!(refinement.is_ok());
         assert!(refinement.unwrap().refines().is_ok());
-    }
-
-    /*#[test]
-    fn machine_refines_self() {
-        let mut symbols = PartitionedSymbolTable::new();
-        let machine = new_machine(&mut symbols);
-        let refinment = Refinement::new(
-            machine.clone().is_input_enabled().unwrap(),
-            machine.clone().is_input_enabled().unwrap(),
-        );
-
-        let automaton = machine.clone().into_automaton().unwrap();
-        let contextual_automaton = automaton.in_context(&symbols);
-        println!("{}", contextual_automaton.dot());
-
-        assert!(refinment.is_ok());
-        assert!(refinment.unwrap().refines().is_ok());
     }
 
     #[test]
     fn administration_refines_self() {
         let mut symbols = PartitionedSymbolTable::new();
         let administration = new_administration(&mut symbols);
-        let refinment = Refinement::new(
+
+        let refinement = Refinement::new(
             administration.clone().is_input_enabled().unwrap(),
             administration.clone().is_input_enabled().unwrap(),
         );
-        assert!(refinment.is_ok());
-        assert!(refinment.unwrap().refines().is_ok());
+
+        assert!(refinement.is_ok());
+        assert!(refinement.unwrap().refines().is_ok());
+    }
+
+    #[test]
+    fn specification_administration() {
+        let mut symbols = PartitionedSymbolTable::new();
+        let specification = new_specification(&mut symbols);
+        let administration = new_administration(&mut symbols);
+        let composition = Composition::new(
+            administration.is_input_enabled().unwrap(),
+            specification.is_input_enabled().unwrap(),
+        );
+
+        assert!(composition.is_err());
+    }
+
+    #[test]
+    fn machine_refines_self() {
+        let mut symbols = PartitionedSymbolTable::new();
+        let machine = new_machine(&mut symbols);
+
+        let refinement = Refinement::new(
+            machine.clone().is_input_enabled().unwrap(),
+            machine.clone().is_input_enabled().unwrap(),
+        );
+
+        assert!(refinement.is_ok());
+        assert!(refinement.unwrap().refines().is_ok());
     }
 
     #[test]
     fn researcher_refines_self() {
         let mut symbols = PartitionedSymbolTable::new();
         let researcher = new_researcher(&mut symbols);
-        let refinment = Refinement::new(
+
+        let refinement = Refinement::new(
             researcher.clone().is_input_enabled().unwrap(),
             researcher.clone().is_input_enabled().unwrap(),
         );
-        assert!(refinment.is_ok());
-        assert!(refinment.unwrap().refines().is_ok());
+
+        assert!(refinement.is_ok());
+        assert!(refinement.unwrap().refines().is_ok());
     }
 
     #[test]
-    fn composition_of_machine_administration_refines_self() {
+    fn machine_administration_refines_self() {
         let mut symbols = PartitionedSymbolTable::new();
         let machine = new_machine(&mut symbols);
         let administration = new_administration(&mut symbols);
-
-        let machine_administration = Composition::new(
-            machine.is_input_enabled().unwrap(),
+        let composition = Composition::new(
             administration.is_input_enabled().unwrap(),
-        )
-        .unwrap();
+            machine.is_input_enabled().unwrap(),
+        ).unwrap();
 
-        let refinment = Refinement::new(
-            Box::new(machine_administration.clone().into()),
-            Box::new(machine_administration.clone().into()),
+        let refinement = Refinement::new(
+            Box::new(composition.clone().into()),
+            Box::new(composition.clone().into()),
         );
-        assert!(refinment.is_ok());
-        assert!(refinment.unwrap().refines().is_ok());
+
+        assert!(refinement.is_ok());
+        assert!(refinement.unwrap().refines().is_ok());
     }
 
     #[test]
-    fn composition_of_administration_researcher_refines_self() {
-        let mut symbols = PartitionedSymbolTable::new();
-        let machine = new_researcher(&mut symbols);
-        let administration = new_administration(&mut symbols);
-
-        let machine_administration = Composition::new(
-            machine.is_input_enabled().unwrap(),
-            administration.is_input_enabled().unwrap(),
-        )
-        .unwrap();
-
-        let refinment = Refinement::new(
-            Box::new(machine_administration.clone().into()),
-            Box::new(machine_administration.clone().into()),
-        );
-        assert!(refinment.is_ok());
-        assert!(refinment.unwrap().refines().is_ok());
-    }*/
-
-    /*#[test]
-    fn composition_of_machine_researcher_refines_self() {
-        // The interplay between the machine and researcher fails.
-        // However, machine and administration succeeds.
-        // Also, researcher and administration succeeds.
-
-        // The bug is most likely a missing infinity check in a DBM computation as there are some extremely high limits
-        // whihc are very close to the max value. I suspect that it is a place where limits are subtracted manually.
+    fn machine_researcher_refines_self() {
+        // FAILS!
         let mut symbols = PartitionedSymbolTable::new();
         let machine = new_machine(&mut symbols);
         let researcher = new_researcher(&mut symbols);
-
-        let machine_researcher = Composition::new(
-            machine.is_input_enabled().unwrap(),
+        let composition = Composition::new(
             researcher.is_input_enabled().unwrap(),
-        )
-        .unwrap();
+            machine.is_input_enabled().unwrap(),
+        ).unwrap();
 
-        let automaton = machine_researcher.clone().into_automaton().unwrap();
-        let contextual_automaton = automaton.in_context(&symbols);
-        println!("{}", contextual_automaton.dot());
-
-        let refinment = Refinement::new(
-            Box::new(machine_researcher.clone().into()),
-            Box::new(machine_researcher.clone().into()),
+        let refinement = Refinement::new(
+            Box::new(composition.clone().into()),
+            Box::new(composition.clone().into()),
         );
-        assert!(refinment.is_ok());
-        let refines = refinment.unwrap().refines();
 
-        let (implementation_ct, specification_ct) = refines.err().unwrap();
-        let boxed: Box<dyn TIOA> = Box::new(machine_researcher);
-        println!("{}", implementation_ct.in_context(&boxed, &symbols).dot());
-        println!("{}", specification_ct.in_context(&boxed, &symbols).dot());
+        assert!(refinement.is_ok());
+        assert!(refinement.unwrap().refines().is_ok());
     }
 
     #[test]
-    fn composition_of_researcher_machine_administration_refines_self() {
+    fn administration_researcher_refines_self() {
         let mut symbols = PartitionedSymbolTable::new();
-        let machine = new_machine(&mut symbols);
         let administration = new_administration(&mut symbols);
         let researcher = new_researcher(&mut symbols);
-
-        let machine_administration = Composition::new(
-            machine.is_input_enabled().unwrap(),
-            administration.is_input_enabled().unwrap(),
-        )
-        .unwrap();
-        let machine_administration_researcher = Composition::new(
-            Box::new(machine_administration.into()),
+        let composition = Composition::new(
             researcher.is_input_enabled().unwrap(),
-        )
-        .unwrap();
+            administration.is_input_enabled().unwrap(),
+        ).unwrap();
 
-        let refinment = Refinement::new(
-            Box::new(machine_administration_researcher.clone().into()),
-            Box::new(machine_administration_researcher.clone().into()),
+        let refinement = Refinement::new(
+            Box::new(composition.clone().into()),
+            Box::new(composition.clone().into()),
         );
-        assert!(refinment.is_ok());
-        let refines = refinment.unwrap().refines();
 
-        let (implementation_ct, specification_ct) = refines.err().unwrap();
-        let boxed: Box<dyn TIOA> = Box::new(machine_administration_researcher);
-        println!("{}", implementation_ct.in_context(&boxed, &symbols).dot());
-        println!("{}", specification_ct.in_context(&boxed, &symbols).dot());
-
-        // assert!(refines.is_ok());
+        assert!(refinement.is_ok());
+        assert!(refinement.unwrap().refines().is_ok());
     }
 
     #[test]
-    fn implementation_refines_specification() {
+    fn machine_administration_researcher_refines_self() {
+        // FAILS! Same as "machine_researcher"
         let mut symbols = PartitionedSymbolTable::new();
+        let administration = new_administration(&mut symbols);
+        let researcher = new_researcher(&mut symbols);
+        let machine = new_machine(&mut symbols);
+        let researcher_administration = Composition::new(
+            researcher.is_input_enabled().unwrap(),
+            administration.is_input_enabled().unwrap(),
+        ).unwrap();
+        let machine_researcher_administration = Composition::new(
+            machine.is_input_enabled().unwrap(),
+            Box::new(researcher_administration.into()),
+        ).unwrap();
+
+        let refinement = Refinement::new(
+            Box::new(machine_researcher_administration.clone().into()),
+            Box::new(machine_researcher_administration.clone().into()),
+        );
+
+        assert!(refinement.is_ok());
+        assert!(refinement.unwrap().refines().is_ok());
+    }
+
+    #[test]
+    fn machine_administration_researcher_refines_specification() {
+        // FAILS!
+        let mut symbols = PartitionedSymbolTable::new();
+        let administration = new_administration(&mut symbols);
+        let researcher = new_researcher(&mut symbols);
+        let machine = new_machine(&mut symbols);
+        let researcher_administration = Composition::new(
+            researcher.is_input_enabled().unwrap(),
+            administration.is_input_enabled().unwrap(),
+        ).unwrap();
+        let machine_researcher_administration = Composition::new(
+            machine.is_input_enabled().unwrap(),
+            Box::new(researcher_administration.into()),
+        ).unwrap();
         let specification = new_specification(&mut symbols);
-        let machine = new_machine(&mut symbols);
-        let administration = new_administration(&mut symbols);
-        let researcher = new_researcher(&mut symbols);
 
-        let machine_administration = Composition::new(
-            machine.is_input_enabled().unwrap(),
-            administration.is_input_enabled().unwrap(),
-        )
-        .unwrap();
-        let machine_administration_researcher = Composition::new(
-            Box::new(machine_administration.into()),
-            researcher.is_input_enabled().unwrap(),
-        )
-        .unwrap();
-
-        let refinment = Refinement::new(
-            Box::new(machine_administration_researcher.into()),
-            specification.is_input_enabled().unwrap(),
+        let refinement = Refinement::new(
+            Box::new(machine_researcher_administration.clone().into()),
+            specification.clone().is_input_enabled().unwrap(),
         );
-        assert!(refinment.is_ok());
-        assert!(refinment.unwrap().refines().is_ok());
-    }*/
+
+        assert!(refinement.is_ok());
+        assert!(refinement.unwrap().refines().is_ok());
+    }
+
+    #[test]
+    fn machine_specification_refines_self() {
+        let mut symbols = PartitionedSymbolTable::new();
+        let machine_specification = new_machine_specification(&mut symbols);
+
+        let refinement = Refinement::new(
+            machine_specification.clone().is_input_enabled().unwrap(),
+            machine_specification.clone().is_input_enabled().unwrap(),
+        );
+
+        assert!(refinement.is_ok());
+        assert!(refinement.unwrap().refines().is_ok());
+    }
+
+    #[test]
+    fn machine_specification_refines_machine() {
+        let mut symbols = PartitionedSymbolTable::new();
+        let machine = new_machine(&mut symbols);
+        let machine_specification = new_machine_specification(&mut symbols);
+
+        let refinement = Refinement::new(
+            machine_specification.clone().is_input_enabled().unwrap(),
+            machine.clone().is_input_enabled().unwrap(),
+        );
+
+        assert!(refinement.is_ok());
+        assert!(refinement.unwrap().refines().is_ok());
+    }
+
+    #[test]
+    fn machine_refines_machine_specification() {
+        let mut symbols = PartitionedSymbolTable::new();
+        let machine = new_machine(&mut symbols);
+        let machine_specification = new_machine_specification(&mut symbols);
+
+        let refinement = Refinement::new(
+            machine.clone().is_input_enabled().unwrap(),
+            machine_specification.clone().is_input_enabled().unwrap(),
+        );
+
+        assert!(refinement.is_ok());
+        assert!(refinement.unwrap().refines().is_err());
+    }
 }

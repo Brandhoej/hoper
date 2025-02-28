@@ -24,6 +24,10 @@ impl Interval {
         Self::new(Relation::strict(lower), Relation::strict(upper))
     }
 
+    pub fn singleton(limit: Limit) -> Self {
+        Self::closed(limit, limit)
+    }
+
     pub const fn lower(&self) -> Relation {
         self.lower
     }

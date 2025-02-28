@@ -317,6 +317,9 @@ impl Relation {
 
     /// subtract other from self by "self + (-other)".
     pub const fn subtraction(&self, other: &Self) -> Self {
+        if self.is_infinity() && other.is_infinity() {
+            return INFINITY;
+        }
         if self.equals(other) {
             return ZERO;
         }

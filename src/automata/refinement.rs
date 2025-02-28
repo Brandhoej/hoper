@@ -3,7 +3,7 @@ use std::collections::{HashSet, VecDeque};
 use itertools::Itertools;
 use petgraph::graph::NodeIndex;
 
-use crate::automata::tiots::TIOTS;
+use crate::{automata::tiots::TIOTS, zones::constraint::Relation};
 
 use super::{
     action::Action,
@@ -34,20 +34,18 @@ impl RefinementStatePair {
         // Whenever s -d->ᔆ s' for some s' ∈ Qᔆ and d ∈ ℝ≥0, then t -d->ᵀ t' and (s', t') ∈ R for some t' ∈ Qᵀ.
         // In other words: The implementation can be faster than the specification, but not slower.
 
-        let implementation_interval = implementation.ref_zone().interval_dep();
-        let specification_interval = specification.ref_zone().interval_dep();
+        let implementation_delay = implementation.ref_zone().max_delay();
+        let specification_delay = specification.ref_zone().max_delay();
 
         // The implementation uses more time than the specification and is thereby slower.
-        if implementation_interval.included() > specification_interval.included() {
+        if implementation_delay > specification_delay {
             return Err(());
         }
 
         // The specification is more loose and has delayed more than the implementation.
         // The delays should be synchronised and therefore, the specificaiton has to be un-delayed.
-        if specification_interval.included() > implementation_interval.included() {
-            specification
-                .mut_zone()
-                .delay_to(implementation_interval.included());
+        if specification_delay > implementation_delay {
+            specification.mut_zone().set_max_delay(implementation_delay);
         }
 
         Ok(RefinementStatePair::new(implementation, specification))
@@ -160,28 +158,20 @@ impl Refinement {
             return Err(());
         }
 
-        // FIXME: THESE ARE NOT SYNCHRONISED AND ALLOW DIFFERENT INITIAL DELAYS.
-        println!(
-            "{}",
-            implementation_state
-                .clone()
-                .unwrap()
-                .ref_zone()
-                .fmt_conjunctions(&vec!["x", "y"])
-        );
-        println!(
-            "{}",
-            specification_state
-                .clone()
-                .unwrap()
-                .ref_zone()
-                .fmt_conjunctions(&vec!["x", "y"])
-        );
+        let mut implementation_state = implementation_state.unwrap();
+        let mut specification_state = specification_state.unwrap();
 
-        RefinementStatePair::from_states(
-            implementation_state.unwrap(),
-            specification_state.unwrap(),
-        )
+        let implementation_delay = implementation_state.ref_zone().max_delay();
+        let specification_delay = specification_state.ref_zone().max_delay();
+        let max_common_delay = implementation_delay.min(specification_delay);
+        implementation_state
+            .mut_zone()
+            .set_max_delay(max_common_delay);
+        specification_state
+            .mut_zone()
+            .set_max_delay(max_common_delay);
+
+        RefinementStatePair::from_states(implementation_state, specification_state)
     }
 
     pub fn refines(
@@ -344,63 +334,20 @@ impl Refinement {
                     (mut specification_state, specification_traversal),
                 ) in product
                 {
-                    println!("");
-                    println!(
-                        "Implementation location: {} -{}-> {}",
-                        pair.implementation.location(),
-                        implementation_traversal.edge(),
-                        implementation_traversal.destination()
-                    );
-                    println!(
-                        "Specification location: {} -{}-> {}",
-                        pair.specification.location(),
-                        specification_traversal.edge(),
-                        specification_traversal.destination()
-                    );
-                    println!(
-                        "Before implementation: {}",
-                        pair.implementation
-                            .ref_zone()
-                            .fmt_conjunctions(&vec!["x", "y"])
-                    );
-                    println!(
-                        "Before specification: {}",
-                        pair.specification
-                            .ref_zone()
-                            .fmt_conjunctions(&vec!["x", "y"])
-                    );
-
-                    // Ensure that they are they are enabled at the same time.
-                    let implementation_delay_by = pair
+                    let required_delay_implementation = pair
                         .implementation
                         .ref_zone()
-                        .delayed_by(implementation_state.ref_zone());
-                    let specification_delay_by = pair
+                        .required_delay(implementation_state.ref_zone());
+                    let required_delay_specification = pair
                         .specification
                         .ref_zone()
-                        .delayed_by(specification_state.ref_zone());
+                        .required_delay(specification_state.ref_zone());
 
-                    match implementation_delay_by.intersection(&specification_delay_by) {
-                        Some(intersection) => {
-                            println!("Enabled intersection: {}", intersection);
-                            implementation_state.mut_zone().clamp_inside(intersection);
-                            specification_state.mut_zone().clamp_inside(intersection);
-                        }
-                        None => continue,
+                    if let None =
+                        required_delay_implementation.intersection(&required_delay_specification)
+                    {
+                        continue;
                     }
-
-                    println!(
-                        "Enabled implementation: {}",
-                        implementation_state
-                            .ref_zone()
-                            .fmt_conjunctions(&vec!["x", "y"])
-                    );
-                    println!(
-                        "Enabled specification: {}",
-                        specification_state
-                            .ref_zone()
-                            .fmt_conjunctions(&vec!["x", "y"])
-                    );
 
                     // Traverse
                     implementation_state = self
@@ -412,79 +359,29 @@ impl Refinement {
                         .traverse(specification_state, &specification_traversal)
                         .unwrap();
 
-                    println!(
-                        "Traversed implementation: {}",
-                        implementation_state
-                            .ref_zone()
-                            .fmt_conjunctions(&vec!["x", "y"])
-                    );
-                    println!(
-                        "Traversed specification: {}",
-                        specification_state
-                            .ref_zone()
-                            .fmt_conjunctions(&vec!["x", "y"])
-                    );
-
                     // Delay
-                    let mut final_implementation_state = self
+                    let mut delayed_implementation_state = self
                         .implementation
                         .delay(implementation_state.clone())
                         .unwrap();
-                    let mut final_specification_state = self
+                    let mut delayed_specification_state = self
                         .specification
                         .delay(specification_state.clone())
                         .unwrap();
 
-                    println!(
-                        "Delayed implementation: {}",
-                        final_implementation_state
-                            .ref_zone()
-                            .fmt_conjunctions(&vec!["x", "y"])
-                    );
-                    println!(
-                        "Delayed specification: {}",
-                        final_specification_state
-                            .ref_zone()
-                            .fmt_conjunctions(&vec!["x", "y"])
-                    );
-
-                    // Ensure that they delay the same.
-                    let implementation_delay_by = implementation_state
-                        .ref_zone()
-                        .delayed_by(final_implementation_state.ref_zone());
-                    let specification_delay_by = specification_state
-                        .ref_zone()
-                        .delayed_by(final_specification_state.ref_zone());
-
-                    match implementation_delay_by.intersection(&specification_delay_by) {
-                        Some(intersection) => {
-                            println!("Delay intersection: {}", intersection);
-                            final_implementation_state
-                                .mut_zone()
-                                .clamp_inside(intersection);
-                            final_specification_state
-                                .mut_zone()
-                                .clamp_inside(intersection);
-                        }
-                        None => continue,
-                    }
-
-                    println!(
-                        "Adjusted by delay implementation: {}",
-                        final_implementation_state
-                            .ref_zone()
-                            .fmt_conjunctions(&vec!["x", "y"])
-                    );
-                    println!(
-                        "Adjusted by delay specification: {}",
-                        final_specification_state
-                            .ref_zone()
-                            .fmt_conjunctions(&vec!["x", "y"])
-                    );
+                    let implementation_delay = delayed_implementation_state.ref_zone().max_delay();
+                    let specification_delay = delayed_specification_state.ref_zone().max_delay();
+                    let max_common_delay = implementation_delay.min(specification_delay);
+                    delayed_implementation_state
+                        .mut_zone()
+                        .set_max_delay(max_common_delay);
+                    delayed_specification_state
+                        .mut_zone()
+                        .set_max_delay(max_common_delay);
 
                     match RefinementStatePair::from_states(
-                        final_implementation_state,
-                        final_specification_state,
+                        delayed_implementation_state,
+                        delayed_specification_state,
                     ) {
                         Ok(pair) => {
                             let mut visited = true;
