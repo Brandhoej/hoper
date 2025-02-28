@@ -204,19 +204,22 @@ mod tests {
     use itertools::Itertools;
     use petgraph::{graph::DiGraph, visit::EdgeRef};
 
-    use crate::{automata::{
-        action::Action,
-        automaton::Automaton,
-        automaton_builder::AutomatonBuilder,
-        edge::Edge,
-        expressions::{Comparison, Expression},
-        literal::Literal,
-        location::Location,
-        partitioned_symbol_table::PartitionedSymbolTable,
-        statements::Statement,
-        tioa::{EdgeTree, LocationTree, Traversal, TIOA},
-        tiots::TIOTS,
-    }, zones::intervals::Interval};
+    use crate::{
+        automata::{
+            action::Action,
+            automaton::Automaton,
+            automaton_builder::AutomatonBuilder,
+            edge::Edge,
+            expressions::{Comparison, Expression},
+            literal::Literal,
+            location::Location,
+            partitioned_symbol_table::PartitionedSymbolTable,
+            statements::Statement,
+            tioa::{EdgeTree, LocationTree, Traversal, TIOA},
+            tiots::TIOTS,
+        },
+        zones::intervals::Interval,
+    };
 
     #[test]
     fn test_automaton_1() {
@@ -539,7 +542,9 @@ mod tests {
         let loc1_symbol = builder.add_symbol(0, "1");
         let loc2_symbol = builder.add_symbol(0, "2");
         let loc3_symbol = builder.add_symbol(0, "3");
-        assert!(loc0_symbol != loc1_symbol && loc1_symbol != loc2_symbol && loc2_symbol != loc3_symbol);
+        assert!(
+            loc0_symbol != loc1_symbol && loc1_symbol != loc2_symbol && loc2_symbol != loc3_symbol
+        );
 
         let action = builder.add_symbol(0, "action");
 
@@ -644,9 +649,9 @@ mod tests {
         assert!(conjunctions.contains("-y < -16"));
         assert!(conjunctions.contains("y - x < 23"));
 
-        let state_interval = state.ref_zone().interval();
-        let state_interval_0 = state_0.ref_zone().interval();
-        let state_interval_1 = state_1.ref_zone().interval();
+        let state_interval = state.ref_zone().interval_dep();
+        let state_interval_0 = state_0.ref_zone().interval_dep();
+        let state_interval_1 = state_1.ref_zone().interval_dep();
 
         assert_eq!("[0, ∞]", state_interval.to_string());
         assert_eq!("[0, 15]", state_interval_0.to_string());
@@ -686,7 +691,6 @@ mod tests {
         assert_eq!("(6, ≤)", adjusted_zone_1.lowest(y).to_string());
         assert_eq!("(23, <)", adjusted_zone_1.highest(y).to_string());
 
-
         // -x < -10 ∧ x ≤ 15 ∧ x - y ≤ -6 ∧ -y < -16 ∧ y < 38 ∧ y - x < 23
         adjusted_zone_0.clamp_test(x, Interval::new(lower_difference_0, upper_difference_0));
         let conjunctions = adjusted_zone_0.fmt_conjunctions(&labels);
@@ -714,4 +718,3 @@ mod tests {
         assert_eq!(0, subtraction.len());
     }
 }
-

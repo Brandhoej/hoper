@@ -333,7 +333,7 @@ impl Relation {
 
     pub fn abs(self) -> Self {
         if self.is_infinity() {
-            return self
+            return self;
         }
 
         if self.limit() < 0 {
@@ -733,7 +733,7 @@ mod tests {
 
         let mut rng = rand::thread_rng();
         for _ in 0..10_000 {
-            let limit = rng.gen_range(MIN_LIMIT..=MAX_LIMIT-1);
+            let limit = rng.gen_range(MIN_LIMIT..=MAX_LIMIT - 1);
             let relation = Relation::new(limit, Strictness::Weak);
             assert_eq!(limit, relation.limit())
         }

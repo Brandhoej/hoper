@@ -34,8 +34,8 @@ impl RefinementStatePair {
         // Whenever s -d->ᔆ s' for some s' ∈ Qᔆ and d ∈ ℝ≥0, then t -d->ᵀ t' and (s', t') ∈ R for some t' ∈ Qᵀ.
         // In other words: The implementation can be faster than the specification, but not slower.
 
-        let implementation_interval = implementation.ref_zone().interval();
-        let specification_interval = specification.ref_zone().interval();
+        let implementation_interval = implementation.ref_zone().interval_dep();
+        let specification_interval = specification.ref_zone().interval_dep();
 
         // The implementation uses more time than the specification and is thereby slower.
         if implementation_interval.included() > specification_interval.included() {
