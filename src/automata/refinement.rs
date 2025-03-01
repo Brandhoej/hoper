@@ -3,7 +3,7 @@ use std::collections::{HashSet, VecDeque};
 use itertools::Itertools;
 use petgraph::graph::NodeIndex;
 
-use crate::{automata::tiots::TIOTS, zones::constraint::Relation};
+use crate::{automata::tiots::TIOTS, zones::constraint::{Relation, INFINITY}};
 
 use super::{
     action::Action,
@@ -369,9 +369,23 @@ impl Refinement {
                         .delay(specification_state.clone())
                         .unwrap();
 
-                    let implementation_delay = delayed_implementation_state.ref_zone().max_delay();
-                    let specification_delay = delayed_specification_state.ref_zone().max_delay();
-                    let max_common_delay = implementation_delay.min(specification_delay);
+                    let before_specification_delay = specification_state.ref_zone().max_delay();
+                    let after_specification_delay = delayed_specification_state.ref_zone().max_delay();
+                    let specification_delay_difference = if after_specification_delay.is_infinity() {
+                        INFINITY
+                    } else {
+                        after_specification_delay - before_specification_delay
+                    };
+
+                    let before_implementation_delay = implementation_state.ref_zone().max_delay();
+                    let after_implementation_delay = delayed_implementation_state.ref_zone().max_delay();
+                    let implementation_delay_difference = if after_implementation_delay.is_infinity() {
+                        INFINITY
+                    } else {
+                        after_implementation_delay - before_implementation_delay
+                    };
+
+                    let max_common_delay = implementation_delay_difference.min(specification_delay_difference);
                     delayed_implementation_state
                         .mut_zone()
                         .set_max_delay(max_common_delay);
