@@ -117,6 +117,19 @@ impl Composition {
             rhs_unique_actions,
         })
     }
+
+    pub fn common_actions(&self) -> impl Iterator<Item = &Action> {
+        self.common_actions.iter()
+    }
+
+    pub fn lhs_unique_actions(&self) -> impl Iterator<Item = &Action> {
+        self.lhs_unique_actions.iter()
+    }
+
+    pub fn rhs_unique_actions(&self) -> impl Iterator<Item = &Action> {
+        self.rhs_unique_actions.iter()
+    }
+
 }
 
 impl TA for Composition {

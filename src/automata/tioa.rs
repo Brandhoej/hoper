@@ -5,7 +5,7 @@ use itertools::Itertools;
 
 use petgraph::graph::{EdgeIndex, NodeIndex};
 
-use super::{action::Action, channel::Channel, edge::Edge, ioa::IOA, location::Location, ta::TA};
+use super::{channel::Channel, edge::Edge, ioa::IOA, location::Location, ta::TA};
 
 #[derive(PartialEq, Eq, Clone, Hash, Debug)]
 pub enum LocationTree {

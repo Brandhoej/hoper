@@ -1,8 +1,9 @@
 use crate::{
     automata::extrapolator::Extrapolator,
     zones::{
+        self,
         bounds::Bounds,
-        constraint::Clock,
+        constraint::Relation,
         dbm::{Canonical, DBM},
     },
 };
@@ -55,6 +56,16 @@ impl State {
 
     pub fn extrapolate(mut self, bounds: Bounds) -> Result<Self, ()> {
         match self.zone.extrapolate(bounds) {
+            Ok(zone) => {
+                self.zone = zone;
+                Ok(self)
+            }
+            Err(_) => Err(()),
+        }
+    }
+
+    pub fn set_max_delay(mut self, max_delay: Relation) -> Result<Self, ()> {
+        match self.zone.set_max_delay(max_delay) {
             Ok(zone) => {
                 self.zone = zone;
                 Ok(self)
@@ -185,9 +196,11 @@ impl<T: ?Sized + TIOA> TIOTS for T {
 
                 // Extrapolating the state on the guard's bounds means that the state becomming a
                 // subset of the original state. This subset is the set allowed to traverse the edge.
-                let edge = self.edge(traversal.edge());
-                let edge_bounds =
-                    extrapolator.bounds(state.ref_zone().into(), &state, edge.unwrap().guard());
+                let edge = self.edge(traversal.edge()).unwrap();
+                let guard = edge.guard();
+
+                let edge_bounds = extrapolator.bounds(state.ref_zone().into(), &state, guard);
+
                 return match state.clone().extrapolate(edge_bounds) {
                     Ok(extrapolation) => Some((extrapolation, traversal)),
                     Err(_) => None,

@@ -4,7 +4,7 @@ use itertools::Itertools;
 use petgraph::{
     dot::Dot,
     graph::{DiGraph, EdgeIndex, EdgeReference, NodeIndex},
-    visit::EdgeRef,
+    visit::{EdgeRef, IntoNodeReferences},
     Direction::{Incoming, Outgoing},
     Graph,
 };
@@ -81,6 +81,12 @@ impl Automaton {
 
     pub fn outputs(&self) -> impl Iterator<Item = &Action> {
         self.outputs.iter()
+    }
+
+    pub fn node_index_of(&self, symbols: Vec<PartitionedSymbol>) -> Option<NodeIndex> {
+        self.graph.node_references()
+            .find(|(_, location)| location.fullname().eq(&symbols))
+            .map(|(index, _)| index)
     }
 
     pub fn traversals<'a, T: Iterator<Item = EdgeReference<'a, Edge>> + 'a>(
