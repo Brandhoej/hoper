@@ -3,7 +3,7 @@ mod tests {
     use itertools::Itertools;
 
     use crate::automata::{
-        automaton::Automaton,
+        automaton::{Automaton, IntoAutomaton},
         automaton_builder::AutomatonBuilder,
         composition::Composition,
         expressions::{Comparison, Expression},
@@ -109,8 +109,8 @@ mod tests {
 
         // Build
         let reset_y = Statement::reset(clock, 0);
-        let y_less_than_or_equal_6 =
-            Expression::new_clock_constraint(clock.into(), Comparison::LessThan, 6.into());
+        let y_less_than_or_equal_5 =
+            Expression::new_clock_constraint(clock.into(), Comparison::LessThanOrEqual, 5.into());
         let y_greater_than_or_equal_4 = Expression::new_clock_constraint(
             clock.into(),
             Comparison::GreaterThanOrEqual,
@@ -123,7 +123,7 @@ mod tests {
         );
 
         let loc0 = builder.add_location(loc0_symbol, None);
-        let loc1 = builder.add_location(loc1_symbol, Some(y_less_than_or_equal_6));
+        let loc1 = builder.add_location(loc1_symbol, Some(y_less_than_or_equal_5));
         builder.set_initial_location(loc0);
 
         builder.add_edge_output(
@@ -134,7 +134,6 @@ mod tests {
             None,
         );
         builder.add_edge_input(loc0, loc1, coin, None, Some(reset_y.clone()));
-        builder.add_edge_output(loc1, loc0, tea, None, None);
         builder.add_edge_input(loc1, loc1, coin, None, None);
         builder.add_edge_output(
             loc1,
@@ -293,8 +292,8 @@ mod tests {
         let mut symbols = PartitionedSymbolTable::new();
         let machine = new_machine(&mut symbols);
 
-        /*let contextual_automaton = machine.in_context(&symbols);
-        println!("{}", contextual_automaton.dot());*/
+        let contextual_automaton = machine.in_context(&symbols);
+        println!("{}", contextual_automaton.dot());
 
         assert_eq!(machine.inputs().try_len().unwrap(), 1);
         assert_eq!(machine.outputs().try_len().unwrap(), 2);
@@ -321,8 +320,8 @@ mod tests {
         let mut symbols = PartitionedSymbolTable::new();
         let researcher = new_researcher(&mut symbols);
 
-        /*let contextual_automaton = researcher.in_context(&symbols);
-        println!("{}", contextual_automaton.dot());*/
+        let contextual_automaton = researcher.in_context(&symbols);
+        println!("{}", contextual_automaton.dot());
 
         assert_eq!(researcher.inputs().try_len().unwrap(), 2);
         assert_eq!(researcher.outputs().try_len().unwrap(), 1);
@@ -369,6 +368,22 @@ mod tests {
         );
 
         assert!(composition.is_err());
+    }
+
+    #[test]
+    fn machine_researcher() {
+        // FAILS!
+        let mut symbols = PartitionedSymbolTable::new();
+        let machine = new_machine(&mut symbols);
+        let researcher = new_researcher(&mut symbols);
+        let composition = Composition::new(
+            machine.is_input_enabled().unwrap(),
+            researcher.is_input_enabled().unwrap(),
+        ).unwrap();
+        let automaton = composition.into_automaton().unwrap();
+
+        let contextual_automaton = automaton.in_context(&symbols);
+        println!("{}", contextual_automaton.dot());
     }
 
     #[test]

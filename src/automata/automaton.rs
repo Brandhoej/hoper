@@ -259,6 +259,8 @@ pub trait IntoAutomaton {
 
 impl<T: TIOA> IntoAutomaton for T {
     fn into_automaton(self) -> Result<Automaton, ()> {
+        let channels = self.channels();
+
         let mut graph: Graph<Location, Edge> = DiGraph::new();
         let mut mapping: HashMap<LocationTree, NodeIndex> = HashMap::new();
         let mut visited: HashSet<LocationTree> = HashSet::new();
@@ -271,23 +273,26 @@ impl<T: TIOA> IntoAutomaton for T {
                 continue;
             }
 
+            // Get or add the current location:
             let from = self.location(&source_tree).unwrap();
-
             let source = *mapping
                 .entry(source_tree.clone())
                 .or_insert_with(|| graph.add_node(from));
 
-            for channel in self.channels() {
-                let traversals = self.outgoing_traversals(&source_tree, channel).unwrap();
+            for channel in channels.iter() {
+                let traversals = self.outgoing_traversals(&source_tree, *channel).unwrap();
                 for traversal in traversals {
+                    // Add location:
                     let destination_tree = traversal.destination().clone();
                     let to = self.location(&destination_tree).unwrap();
                     let destination = *mapping
                         .entry(destination_tree.clone())
                         .or_insert_with(|| graph.add_node(to));
+                    // Add edge:
                     let edge_tree = traversal.edge();
                     let edge = self.edge(edge_tree).unwrap();
                     graph.add_edge(source, destination, edge);
+
                     trees.push_back(destination_tree);
                 }
             }

@@ -190,8 +190,6 @@ impl TIOA for Composition {
                     rhs_location,
                     self.rhs.channel(*channel.action()).unwrap(),
                 );
-            } else {
-                unreachable!()
             }
 
             if lhs_traversals.is_err() || rhs_traversals.is_err() {
@@ -266,5 +264,186 @@ impl TIOA for Composition {
 impl From<Composition> for Specification {
     fn from(value: Composition) -> Self {
         Self::new(value)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use itertools::Itertools;
+
+    use crate::automata::{automaton::{Automaton, IntoAutomaton}, automaton_builder::AutomatonBuilder, expressions::{Comparison, Expression}, input_enabled::InputEnabled, partitioned_symbol_table::PartitionedSymbolTable, statements::Statement};
+
+    use super::Composition;
+
+    fn new_automaton_a(symbols: &mut PartitionedSymbolTable) -> Automaton {
+        let mut builder = AutomatonBuilder::new(symbols);
+        let loc0_symbol = builder.add_symbol(1, "a0");
+        let loc0 = builder.add_location(loc0_symbol, None);
+        builder.set_initial_location(loc0);
+        builder.build().unwrap()
+    }
+
+    fn new_automaton_b(symbols: &mut PartitionedSymbolTable) -> Automaton {
+        let mut builder = AutomatonBuilder::new(symbols);
+        // Global declarations:
+        let bc_action = builder.add_symbol(0, "bc");
+        
+        // Local declarations:
+        let loc0_symbol = builder.add_symbol(2, "b0");
+        let loc1_symbol = builder.add_symbol(2, "b1");
+
+        // Build:
+        let loc0 = builder.add_location(loc0_symbol, None);
+        let loc1 = builder.add_location(loc1_symbol, None);
+        builder.set_initial_location(loc0);
+
+        builder.add_edge_input(loc0, loc1, bc_action, None, None);
+
+        builder.build().unwrap()
+    }
+
+    fn new_automaton_c(symbols: &mut PartitionedSymbolTable) -> Automaton {
+        let mut builder = AutomatonBuilder::new(symbols);
+        // Global declarations:
+        let bc_action = builder.add_symbol(0, "bc");
+        
+        // Local declarations:
+        let c_action = builder.add_symbol(3, "c");
+        let loc0_symbol = builder.add_symbol(3, "c0");
+        let loc1_symbol = builder.add_symbol(3, "c1");
+        let loc2_symbol = builder.add_symbol(3, "c2");
+
+        // Build:
+        let loc0 = builder.add_location(loc0_symbol, None);
+        let loc1 = builder.add_location(loc1_symbol, None);
+        let loc2 = builder.add_location(loc2_symbol, None);
+        builder.set_initial_location(loc0);
+
+        builder.add_edge_input(loc0, loc1, c_action, None, None);
+        builder.add_edge_input(loc1, loc2, bc_action, None, None);
+
+        builder.build().unwrap()
+    }
+
+    #[test]
+    fn automaton_a() {
+        let mut symbols = PartitionedSymbolTable::new();
+        let automaton = new_automaton_a(&mut symbols);
+
+        /*let contextual_automaton = automaton.in_context(&symbols);
+        println!("{}", contextual_automaton.dot());*/
+
+        assert_eq!(automaton.inputs().try_len().unwrap(), 0);
+        assert_eq!(automaton.outputs().try_len().unwrap(), 0);
+        assert_eq!(automaton.node_iter().try_len().unwrap(), 1);
+        assert_eq!(automaton.edge_iter().try_len().unwrap(), 0);
+    }
+
+    #[test]
+    fn automaton_b() {
+        let mut symbols = PartitionedSymbolTable::new();
+        let automaton = new_automaton_b(&mut symbols);
+
+        /*let contextual_automaton = automaton.in_context(&symbols);
+        println!("{}", contextual_automaton.dot());*/
+
+        assert_eq!(automaton.inputs().try_len().unwrap(), 1);
+        assert_eq!(automaton.outputs().try_len().unwrap(), 0);
+        assert_eq!(automaton.node_iter().try_len().unwrap(), 2);
+        assert_eq!(automaton.edge_iter().try_len().unwrap(), 1);
+    }
+
+    #[test]
+    fn automaton_c() {
+        let mut symbols = PartitionedSymbolTable::new();
+        let automaton = new_automaton_c(&mut symbols);
+
+        /*let contextual_automaton = automaton.in_context(&symbols);
+        println!("{}", contextual_automaton.dot());*/
+
+        assert_eq!(automaton.inputs().try_len().unwrap(), 2);
+        assert_eq!(automaton.outputs().try_len().unwrap(), 0);
+        assert_eq!(automaton.node_iter().try_len().unwrap(), 3);
+        assert_eq!(automaton.edge_iter().try_len().unwrap(), 2);
+    }
+
+    #[test]
+    fn automaton_a_self_composition() {
+        let mut symbols = PartitionedSymbolTable::new();
+        let lhs = new_automaton_a(&mut symbols);
+        let rhs = new_automaton_a(&mut symbols);
+        let composition = Composition::new(
+            lhs.is_input_enabled().unwrap(),
+            rhs.is_input_enabled().unwrap(),
+        ).unwrap();
+        let automaton = composition.into_automaton().unwrap();
+
+        /*let contextual_automaton = automaton.in_context(&symbols);
+        println!("{}", contextual_automaton.dot());*/
+
+        assert_eq!(automaton.inputs().try_len().unwrap(), 0);
+        assert_eq!(automaton.outputs().try_len().unwrap(), 0);
+        assert_eq!(automaton.node_iter().try_len().unwrap(), 1);
+        assert_eq!(automaton.edge_iter().try_len().unwrap(), 0);
+    }
+
+    #[test]
+    fn automaton_b_self_composition() {
+        let mut symbols = PartitionedSymbolTable::new();
+        let lhs = new_automaton_b(&mut symbols);
+        let rhs = new_automaton_b(&mut symbols);
+        let composition = Composition::new(
+            lhs.is_input_enabled().unwrap(),
+            rhs.is_input_enabled().unwrap(),
+        ).unwrap();
+        let automaton = composition.into_automaton().unwrap();
+
+        /*let contextual_automaton = automaton.in_context(&symbols);
+        println!("{}", contextual_automaton.dot());*/
+
+        assert_eq!(automaton.inputs().try_len().unwrap(), 1);
+        assert_eq!(automaton.outputs().try_len().unwrap(), 0);
+        assert_eq!(automaton.node_iter().try_len().unwrap(), 2);
+        assert_eq!(automaton.edge_iter().try_len().unwrap(), 1);
+    }
+
+    #[test]
+    fn automaton_c_self_composition() {
+        let mut symbols = PartitionedSymbolTable::new();
+        let lhs = new_automaton_c(&mut symbols);
+        let rhs = new_automaton_c(&mut symbols);
+        let composition = Composition::new(
+            lhs.is_input_enabled().unwrap(),
+            rhs.is_input_enabled().unwrap(),
+        ).unwrap();
+        let automaton = composition.into_automaton().unwrap();
+
+        /*let contextual_automaton = automaton.in_context(&symbols);
+        println!("{}", contextual_automaton.dot());*/
+
+        assert_eq!(automaton.inputs().try_len().unwrap(), 2);
+        assert_eq!(automaton.outputs().try_len().unwrap(), 0);
+        assert_eq!(automaton.node_iter().try_len().unwrap(), 3);
+        assert_eq!(automaton.edge_iter().try_len().unwrap(), 2);
+    }
+
+    #[test]
+    fn automaton_b_c_composition() {
+        let mut symbols = PartitionedSymbolTable::new();
+        let lhs = new_automaton_b(&mut symbols);
+        let rhs = new_automaton_c(&mut symbols);
+        let composition = Composition::new(
+            lhs.is_input_enabled().unwrap(),
+            rhs.is_input_enabled().unwrap(),
+        ).unwrap();
+        let automaton = composition.into_automaton().unwrap();
+
+        /*let contextual_automaton = automaton.in_context(&symbols);
+        println!("{}", contextual_automaton.dot());*/
+
+        assert_eq!(automaton.inputs().try_len().unwrap(), 2);
+        assert_eq!(automaton.outputs().try_len().unwrap(), 0);
+        assert_eq!(automaton.node_iter().try_len().unwrap(), 3);
+        assert_eq!(automaton.edge_iter().try_len().unwrap(), 2);
     }
 }
