@@ -117,6 +117,18 @@ impl Composition {
             rhs_unique_actions,
         })
     }
+
+    pub fn common_actions(&self) -> impl Iterator<Item = &Action> {
+        self.common_actions.iter()
+    }
+
+    pub fn lhs_unique_actions(&self) -> impl Iterator<Item = &Action> {
+        self.lhs_unique_actions.iter()
+    }
+
+    pub fn rhs_unique_actions(&self) -> impl Iterator<Item = &Action> {
+        self.rhs_unique_actions.iter()
+    }
 }
 
 impl TA for Composition {
@@ -271,7 +283,14 @@ impl From<Composition> for Specification {
 mod tests {
     use itertools::Itertools;
 
-    use crate::automata::{automaton::{Automaton, IntoAutomaton}, automaton_builder::AutomatonBuilder, expressions::{Comparison, Expression}, input_enabled::InputEnabled, partitioned_symbol_table::PartitionedSymbolTable, statements::Statement};
+    use crate::automata::{
+        automaton::{Automaton, IntoAutomaton},
+        automaton_builder::AutomatonBuilder,
+        expressions::{Comparison, Expression},
+        input_enabled::InputEnabled,
+        partitioned_symbol_table::PartitionedSymbolTable,
+        statements::Statement,
+    };
 
     use super::Composition;
 
@@ -287,7 +306,7 @@ mod tests {
         let mut builder = AutomatonBuilder::new(symbols);
         // Global declarations:
         let bc_action = builder.add_symbol(0, "bc");
-        
+
         // Local declarations:
         let loc0_symbol = builder.add_symbol(2, "b0");
         let loc1_symbol = builder.add_symbol(2, "b1");
@@ -306,7 +325,7 @@ mod tests {
         let mut builder = AutomatonBuilder::new(symbols);
         // Global declarations:
         let bc_action = builder.add_symbol(0, "bc");
-        
+
         // Local declarations:
         let c_action = builder.add_symbol(3, "c");
         let loc0_symbol = builder.add_symbol(3, "c0");
@@ -375,7 +394,8 @@ mod tests {
         let composition = Composition::new(
             lhs.is_input_enabled().unwrap(),
             rhs.is_input_enabled().unwrap(),
-        ).unwrap();
+        )
+        .unwrap();
         let automaton = composition.into_automaton().unwrap();
 
         /*let contextual_automaton = automaton.in_context(&symbols);
@@ -395,7 +415,8 @@ mod tests {
         let composition = Composition::new(
             lhs.is_input_enabled().unwrap(),
             rhs.is_input_enabled().unwrap(),
-        ).unwrap();
+        )
+        .unwrap();
         let automaton = composition.into_automaton().unwrap();
 
         /*let contextual_automaton = automaton.in_context(&symbols);
@@ -415,7 +436,8 @@ mod tests {
         let composition = Composition::new(
             lhs.is_input_enabled().unwrap(),
             rhs.is_input_enabled().unwrap(),
-        ).unwrap();
+        )
+        .unwrap();
         let automaton = composition.into_automaton().unwrap();
 
         /*let contextual_automaton = automaton.in_context(&symbols);
@@ -435,7 +457,8 @@ mod tests {
         let composition = Composition::new(
             lhs.is_input_enabled().unwrap(),
             rhs.is_input_enabled().unwrap(),
-        ).unwrap();
+        )
+        .unwrap();
         let automaton = composition.into_automaton().unwrap();
 
         /*let contextual_automaton = automaton.in_context(&symbols);

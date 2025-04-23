@@ -2,14 +2,15 @@ use crate::{
     automata::extrapolator::Extrapolator,
     zones::{
         bounds::Bounds,
-        constraint::Clock,
-        dbm::{Canonical, DBM},
+        constraint::Relation,
+        dbm::{Canonical, Unsafe, DBM},
     },
 };
 
 use super::{
     action::Action,
     channel::Channel,
+    conversion::Conversion,
     environment::Environment,
     interpreter::Interpreter,
     ioa::IOA,
@@ -55,6 +56,16 @@ impl State {
 
     pub fn extrapolate(mut self, bounds: Bounds) -> Result<Self, ()> {
         match self.zone.extrapolate(bounds) {
+            Ok(zone) => {
+                self.zone = zone;
+                Ok(self)
+            }
+            Err(_) => Err(()),
+        }
+    }
+
+    pub fn delay(mut self, delay: Relation) -> Result<Self, ()> {
+        match self.zone.delay(delay) {
             Ok(zone) => {
                 self.zone = zone;
                 Ok(self)
@@ -109,27 +120,22 @@ pub trait TIOTS
 where
     Self: TA + IOA,
 {
-    fn initial_state(&self) -> Result<State, ()>;
+    fn initial_state(&self) -> State;
     fn delay(&self, state: State) -> Result<State, ()>;
     fn traverse(&self, state: State, traversal: &Traversal) -> Result<State, ()>;
     fn is_enabled(&self, state: State, traversal: &Traversal) -> Result<State, ()>;
-    fn enabled(
-        &self,
-        state: &State,
-        channel: Channel,
-    ) -> impl Iterator<Item = (State, Traversal)> + Clone;
+    fn enabled(&self, state: &State, channel: Channel) -> Vec<(State, Traversal)>;
 }
 
 impl<T: ?Sized + TIOA> TIOTS for T {
-    fn initial_state(&self) -> Result<State, ()> {
+    fn initial_state(&self) -> State {
         let location = self.initial_location();
         let zone = DBM::zero(self.clock_count());
         let mut environemnt = Environment::new();
         for clock in self.clocks() {
             environemnt.insert_clock(clock);
         }
-        let state = State::new(location, zone, environemnt);
-        self.delay(state)
+        State::new(location, zone, environemnt)
     }
 
     /// Extrapolate the state zone on the location invariant.
@@ -172,11 +178,7 @@ impl<T: ?Sized + TIOA> TIOTS for T {
     }
 
     /// Returns the states enabled by the edge and the traversal.
-    fn enabled(
-        &self,
-        state: &State,
-        channel: Channel,
-    ) -> impl Iterator<Item = (State, Traversal)> + Clone {
+    fn enabled(&self, state: &State, channel: Channel) -> Vec<(State, Traversal)> {
         self.outgoing_traversals(state.location(), channel.clone())
             .into_iter()
             .flatten()
@@ -185,15 +187,18 @@ impl<T: ?Sized + TIOA> TIOTS for T {
 
                 // Extrapolating the state on the guard's bounds means that the state becomming a
                 // subset of the original state. This subset is the set allowed to traverse the edge.
-                let edge = self.edge(traversal.edge());
-                let edge_bounds =
-                    extrapolator.bounds(state.ref_zone().into(), &state, edge.unwrap().guard());
+                let edge = self.edge(traversal.edge()).unwrap();
+                let guard = edge.guard();
+
+                let edge_bounds = extrapolator.bounds(state.ref_zone().into(), &state, guard);
+
                 return match state.clone().extrapolate(edge_bounds) {
                     Ok(extrapolation) => Some((extrapolation, traversal)),
                     Err(_) => None,
                 };
             })
             .into_iter()
+            .collect()
     }
 }
 
@@ -201,24 +206,19 @@ impl<T: ?Sized + TIOA> TIOTS for T {
 mod tests {
     use std::collections::HashSet;
 
-    use itertools::Itertools;
     use petgraph::{graph::DiGraph, visit::EdgeRef};
 
-    use crate::{
-        automata::{
-            action::Action,
-            automaton::Automaton,
-            automaton_builder::AutomatonBuilder,
-            edge::Edge,
-            expressions::{Comparison, Expression},
-            literal::Literal,
-            location::Location,
-            partitioned_symbol_table::PartitionedSymbolTable,
-            statements::Statement,
-            tioa::{EdgeTree, LocationTree, Traversal, TIOA},
-            tiots::TIOTS,
-        },
-        zones::intervals::Interval,
+    use crate::automata::{
+        action::Action,
+        automaton::Automaton,
+        edge::Edge,
+        expressions::{Comparison, Expression},
+        literal::Literal,
+        location::Location,
+        partitioned_symbol_table::PartitionedSymbolTable,
+        statements::Statement,
+        tioa::{EdgeTree, LocationTree, Traversal, TIOA},
+        tiots::TIOTS,
     };
 
     #[test]
@@ -281,7 +281,8 @@ mod tests {
             .unwrap();
         assert_eq!(0, traversals_1.len());
 
-        let initial_state = automaton.initial_state().unwrap();
+        let mut initial_state = automaton.initial_state();
+        initial_state = automaton.delay(initial_state).unwrap();
         assert_eq!(
             "-x ≤ 0 ∧ x ≤ 5",
             initial_state.ref_zone().fmt_conjunctions(&vec!["x"])

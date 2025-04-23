@@ -3,7 +3,10 @@ use std::collections::{HashSet, VecDeque};
 use itertools::Itertools;
 use petgraph::graph::NodeIndex;
 
-use crate::{automata::tiots::TIOTS, zones::constraint::Relation};
+use crate::{
+    automata::tiots::TIOTS,
+    zones::constraint::{Relation, INFINITY, ZERO},
+};
 
 use super::{
     action::Action,
@@ -30,24 +33,6 @@ impl RefinementStatePair {
     }
 
     pub fn from_states(implementation: State, mut specification: State) -> Result<Self, ()> {
-        // Rule 5 (Time consistency): When the implementation requires a delay so must the specification.
-        // Whenever s -d->ᔆ s' for some s' ∈ Qᔆ and d ∈ ℝ≥0, then t -d->ᵀ t' and (s', t') ∈ R for some t' ∈ Qᵀ.
-        // In other words: The implementation can be faster than the specification, but not slower.
-
-        let implementation_delay = implementation.ref_zone().max_delay();
-        let specification_delay = specification.ref_zone().max_delay();
-
-        // The implementation uses more time than the specification and is thereby slower.
-        if implementation_delay > specification_delay {
-            return Err(());
-        }
-
-        // The specification is more loose and has delayed more than the implementation.
-        // The delays should be synchronised and therefore, the specificaiton has to be un-delayed.
-        if specification_delay > implementation_delay {
-            specification.mut_zone().set_max_delay(implementation_delay);
-        }
-
         Ok(RefinementStatePair::new(implementation, specification))
     }
 
@@ -140,6 +125,22 @@ impl Refinement {
         })
     }
 
+    pub fn common_inputs(&self) -> impl Iterator<Item = &Action> {
+        self.common_inputs.iter()
+    }
+
+    pub fn common_outputs(&self) -> impl Iterator<Item = &Action> {
+        self.common_outputs.iter()
+    }
+
+    pub fn unique_specification_inputs(&self) -> impl Iterator<Item = &Action> {
+        self.unique_specification_inputs.iter()
+    }
+
+    pub fn unique_implementation_outputs(&self) -> impl Iterator<Item = &Action> {
+        self.unique_implementation_outputs.iter()
+    }
+
     pub fn initial_locations(&self) -> (LocationTree, LocationTree) {
         (
             self.implementation.initial_location(),
@@ -148,7 +149,7 @@ impl Refinement {
     }
 
     pub fn initial(&self) -> Result<RefinementStatePair, ()> {
-        let implementation_state = self.implementation.initial_state();
+        /*let implementation_state = self.implementation.initial_state();
         if let Err(()) = implementation_state {
             return Err(());
         }
@@ -164,14 +165,18 @@ impl Refinement {
         let implementation_delay = implementation_state.ref_zone().max_delay();
         let specification_delay = specification_state.ref_zone().max_delay();
         let max_common_delay = implementation_delay.min(specification_delay);
-        implementation_state
-            .mut_zone()
-            .set_max_delay(max_common_delay);
-        specification_state
-            .mut_zone()
-            .set_max_delay(max_common_delay);
 
-        RefinementStatePair::from_states(implementation_state, specification_state)
+        match implementation_state.set_max_delay(max_common_delay) {
+            Ok(state) => implementation_state = state,
+            Err(_) => todo!(),
+        }
+        match specification_state.set_max_delay(max_common_delay) {
+            Ok(state) => specification_state = state,
+            Err(_) => todo!(),
+        }
+
+        RefinementStatePair::from_states(implementation_state, specification_state)*/
+        todo!()
     }
 
     pub fn refines(
@@ -216,7 +221,6 @@ impl Refinement {
             let mut products: Vec<
                 Box<dyn Iterator<Item = ((State, Traversal), (State, Traversal))>>,
             > = Vec::with_capacity(4);
-
             // Rule 1 (Common inputs): Both the specification and implementaion can react on the input.
             // Whenever t -i?->ᵀ t' for some t' ∈ Qᵀ and i? ∈ Actᵀᵢ ∩ Actᔆᵢ , then s -i?->ᔆ s' and (s', t') ∈ R for some s' ∈ Qᔆ
             for action in self.common_inputs.iter() {
@@ -224,11 +228,13 @@ impl Refinement {
                 let mut specification_states = self
                     .specification
                     .enabled(&pair.specification(), channel.clone())
+                    .into_iter()
                     .peekable();
 
                 let mut implementation_states = self
                     .implementation
                     .enabled(&pair.implementation(), channel.clone())
+                    .into_iter()
                     .peekable();
 
                 // I believe that since both are specifications then thet must both be input-enabled.
@@ -248,6 +254,7 @@ impl Refinement {
                 let mut specification_states = self
                     .specification
                     .enabled(pair.specification(), channel)
+                    .into_iter()
                     .peekable();
 
                 // I believe that since both are specifications then thet must both be input-enabled.
@@ -273,6 +280,7 @@ impl Refinement {
                 let mut implementation_states = self
                     .implementation
                     .enabled(pair.implementation(), channel.clone())
+                    .into_iter()
                     .peekable();
 
                 // Only if the implementation can produce an output is it
@@ -285,10 +293,26 @@ impl Refinement {
                 let mut specification_states = self
                     .specification
                     .enabled(pair.specification(), channel.clone())
+                    .into_iter()
                     .peekable();
+
+                println!(
+                    "Implementation {}: {}",
+                    pair.implementation().location(),
+                    pair.implementation()
+                        .ref_zone()
+                        .fmt_conjunctions(&vec!["x", "y", "z"])
+                );
+                println!(
+                    "Specification {}: {}",
+                    pair.specification().location(),
+                    pair.specification().ref_zone().fmt_conjunctions(&vec!["u"])
+                );
 
                 // The specification could not produce the output the implementation could.
                 if specification_states.peek().is_none() {
+                    assert!(implementation_states.peek().is_some());
+
                     implementation_computation_tree.is_error(source_implementation);
                     specification_computation_tree.is_error(source_specification);
 
@@ -310,6 +334,7 @@ impl Refinement {
                 let mut implementation_states = self
                     .implementation
                     .enabled(pair.implementation(), channel.clone())
+                    .into_iter()
                     .peekable();
 
                 if implementation_states.peek().is_none() {
@@ -334,7 +359,8 @@ impl Refinement {
                     (mut specification_state, specification_traversal),
                 ) in product
                 {
-                    let required_delay_implementation = pair
+                    // Checks the required delay which is used to check if they are enabled at the same time.
+                    /*let required_delay_implementation = pair
                         .implementation
                         .ref_zone()
                         .required_delay(implementation_state.ref_zone());
@@ -343,13 +369,15 @@ impl Refinement {
                         .ref_zone()
                         .required_delay(specification_state.ref_zone());
 
+                    // If there are no intersection then the edges were enabled but not at the same time.
                     if let None =
                         required_delay_implementation.intersection(&required_delay_specification)
                     {
                         continue;
-                    }
+                    }*/
+                    todo!();
 
-                    // Traverse
+                    // Performs the edge's update.
                     implementation_state = self
                         .implementation
                         .traverse(implementation_state, &implementation_traversal)
@@ -359,29 +387,11 @@ impl Refinement {
                         .traverse(specification_state, &specification_traversal)
                         .unwrap();
 
-                    // Delay
-                    let mut delayed_implementation_state = self
-                        .implementation
-                        .delay(implementation_state.clone())
-                        .unwrap();
-                    let mut delayed_specification_state = self
-                        .specification
-                        .delay(specification_state.clone())
-                        .unwrap();
-
-                    let implementation_delay = delayed_implementation_state.ref_zone().max_delay();
-                    let specification_delay = delayed_specification_state.ref_zone().max_delay();
-                    let max_common_delay = implementation_delay.min(specification_delay);
-                    delayed_implementation_state
-                        .mut_zone()
-                        .set_max_delay(max_common_delay);
-                    delayed_specification_state
-                        .mut_zone()
-                        .set_max_delay(max_common_delay);
+                    // TODO: Perform synchronous delays.
 
                     match RefinementStatePair::from_states(
-                        delayed_implementation_state,
-                        delayed_specification_state,
+                        implementation_state,
+                        specification_state,
                     ) {
                         Ok(pair) => {
                             let mut visited = true;

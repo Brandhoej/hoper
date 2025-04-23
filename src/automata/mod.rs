@@ -22,6 +22,7 @@ pub mod refinement;
 pub mod specification;
 pub mod state_set;
 pub mod statements;
+pub mod synchronised_systems;
 pub mod ta;
 pub mod template;
 pub mod tioa;

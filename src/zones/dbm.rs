@@ -1,4 +1,5 @@
-use std::ops::{Bound, Index, IndexMut};
+use core::panic;
+use std::ops::{Index, IndexMut};
 
 use bitset::BitSet;
 
@@ -41,15 +42,6 @@ impl<State: DBMState> DBM<State> {
         &self.relations
     }
 
-    /// Uses the row-wise indexing and not the layered approach since we have the clock set in the DBM.
-    ///
-    /// Eg. 3 clocks (including the reference clock) DBM indexing "(row; column)-index":
-    ///
-    /// [(0; 0)-0, (0; 1)-1, (0; 2)-2]
-    ///
-    /// [(1; 0)-3, (1; 1)-4, (1; 2)-5]
-    ///
-    /// [(2; 0)-6, (2; 1)-7, (2; 2)-8]
     #[inline]
     pub const fn index(&self, i: Clock, j: Clock) -> usize {
         (i * self.dimensions() + j) as usize
@@ -132,28 +124,6 @@ impl<State: DBMState> DBM<State> {
         (REFERENCE..self.dimensions())
             .map(|clock| self.upper(clock))
             .collect()
-    }
-
-    pub fn delay(&mut self, relation: Relation) {
-        if relation.is_infinity() {
-            self.up();
-        } else if !relation.is_zero() {
-            for clock in REFERENCE + 1..self.dimensions() {
-                if !self.upper(clock).is_infinity() {
-                    self.set_upper(clock, self.upper(clock) + relation);
-                }
-            }
-        }
-    }
-
-    pub fn delay_to(&mut self, relation: Relation) {
-        if relation.is_infinity() {
-            self.up();
-        } else if !relation.is_zero() {
-            for clock in REFERENCE + 1..self.dimensions() {
-                self.set_upper(clock, self.lower(clock).negation() + relation);
-            }
-        }
     }
 
     /// The up operation computes the strongest postcondition of a zone with respect to delay.
@@ -803,83 +773,21 @@ impl DBM<Canonical> {
         }
     }
 
-    pub fn expand(&self, expansion: Relation) -> DBM<Canonical> {
-        let mut dbm = self.clone().dirty();
-
-        for i in 0..dbm.dimensions() {
-            for j in 0..dbm.dimensions() {
-                if !dbm[(i, j)].is_infinity() {
-                    dbm[(i, j)] += expansion
-                };
-            }
+    pub fn all_dirty(self) -> DBM<Dirty> {
+        let clocks = self.dimensions();
+        let mut dirty = Dirty::new(clocks);
+        dirty.touch_all();
+        DBM {
+            clocks: self.clocks,
+            relations: self.relations,
+            state: dirty,
         }
-
-        for i in 0..dbm.dimensions() {
-            // Restore reflexive constraints.
-            dbm[(i, i)] = ZERO;
-            dbm[(0, i)] = ZERO;
-        }
-
-        dbm.clean().ok().unwrap()
     }
 
     pub fn extrapolate(self, bounds: Bounds) -> Result<Self, DBM<Unsafe>> {
         match self.dirty().extrapolate(bounds) {
             Ok(dbm) => dbm.clean(),
             Err(dbm) => Err(dbm),
-        }
-    }
-
-    // Returns the intervals of each clock. The inclusion of this
-    // interval is the allowed delay for each of the clocks in the DBM.
-    // This is not an interval as the smallest possible delay is always 0.
-    pub fn delays(&self) -> Vec<(Clock, Relation)> {
-        let mut delays = Vec::new();
-        for clock in REFERENCE + 1..self.dimensions() {
-            let lower = self.lower(clock).negate_limit();
-            let upper = self.upper(clock);
-            let delay = upper - lower;
-            delays.push((clock, delay));
-        }
-        delays
-    }
-
-    // Returns the maximum delay allowed from any of the earliest points in the zone.
-    // This is essentially the inclusion of the smallest interval for any clock.
-    pub fn max_delay(&self) -> Relation {
-        self.delays()
-            .into_iter()
-            .min_by_key(|(_, relation)| *relation)
-            .unwrap()
-            .1
-    }
-
-    // Returns the clocks which has a interval inclusion which is the same as the maximum delay.
-    // Essentially these clocks sets the upper bounds on allowed delay from the earliest point.
-    // It is not just a single clock which can be constraining on the maximum delay as the constrints
-    // can be symmetric as in the case (among other cases ofc) of a constraining clock being synchronised with another.
-    pub fn constraining_clocks(&self) -> Vec<Clock> {
-        let max_delay = self.max_delay();
-        self.delays()
-            .into_iter()
-            .filter(|(_, delay)| *delay == max_delay)
-            .map(|(clock, _)| clock)
-            .collect()
-    }
-
-    // Adjusts the constraining clocks to only allow a delay of the max delay. For synchronisation
-    // between multiple DBMs with disjoint sets of clocks the min value of their max delays is
-    // the maximum allowed delays across all DBMs. This means that if all DBMs are set to that then
-    // they all have the same maximum delay.
-    //
-    // For now I believe that the clocks must remain constraining clocks and therefore, adding the max delay
-    // to the constraining clocks must not make them exceed the delay of a non-constraining clock.
-    pub fn set_max_delay(&mut self, max_delay: Relation) {
-        // Q: Does this work if the max_delay added to the constraining clocks exceeds the other max bounds
-        // Thereby making the clocks which are axceeded new constraining clocks? Maybe, there should be a check forcing
-        // the max delay to stay within the DBM such that they remain constraining the clocks?
-        for clock in self.constraining_clocks() {
-            self.set_upper(clock, self.lower(clock).negation() + max_delay);
         }
     }
 
@@ -892,44 +800,96 @@ impl DBM<Canonical> {
 
     // Computes the delay interval of all clocks
     pub fn clock_intervals(&self) -> Vec<Interval> {
-        (REFERENCE+1..self.dimensions()).map(|clock| self.clock_interval(clock)).collect()
+        (REFERENCE + 1..self.dimensions())
+            .map(|clock| self.clock_interval(clock))
+            .collect()
     }
 
-    // Returns the intervals of every clock which describes the lower and upper bounds
-    // on the possible delays to reach the other DBM.
-    pub fn required_delays(&self, other: &Self) -> Vec<(Clock, Interval)> {
-        let mut required_delays = Vec::new();
-        for clock in REFERENCE + 1..self.dimensions() {
-            let interval_0 = self.clock_interval(clock);
-            let interval_1 = other.clock_interval(clock);
-
-            let lower = interval_1.lower() - interval_0.lower();
-            let upper = interval_1.upper() - interval_0.lower();
-            let interval = Interval::new(lower, upper);
-
-            required_delays.push((clock, interval));
+    /// Computes the per-clock differences in upper bounds between the original and extrapolated zones.
+    ///
+    /// This method calculates, for each clock, the difference between its upper bound in the extrapolated zone
+    /// and its upper bound in the original zone. The result is a vector of these differences, corresponding to each clock.
+    ///
+    /// Interpretation of the per-clock differences:
+    /// - `Relation > 0`: The extrapolated zone is more permissive for this clock; its upper bound increased.
+    /// - `Relation = 0`: No change in the upper bound for this clock.
+    /// - `Relation < 0`: The extrapolated zone is more restrictive for this clock; its upper bound decreased.
+    pub fn delays(&self, extrapolated: &Self) -> Vec<Relation> {
+        if self.clocks() != extrapolated.clocks() {
+            panic!("zones must have the same number of clocks");
         }
-        required_delays
-    }
 
-    // Returns the required delay as an interval where the lower bound is the minimum
-    // required delay to arrive in other. The upper bound of the interval is the maximum delay
-    // which can be performed and still be in the other DBM.
-    pub fn required_delay(&self, other: &Self) -> Interval {
-        let required = self.required_delays(other);
-        let overall_lower = required
-            .iter()
-            .map(|(_, interval)| interval.lower())
-            .max()
-            .unwrap();
-        Interval::new(overall_lower, overall_lower + other.max_delay())
-    }
+        let mut delays = vec![ZERO; self.clocks().into()];
 
-    pub fn is_closed(&self) -> bool {
-        match self.clone().dirty().clean() {
-            Ok(cleaned) => self.relations == cleaned.relations,
-            Err(_) => false,
+        for clock in REFERENCE+1..self.dimensions() {
+            // delay = extrapolated_i - original_i
+            // delays[(clock - 1) as usize] = extrapolated.upper(clock) + self.upper(clock).negate_limit();
+            delays[(clock - 1) as usize] = extrapolated.upper(clock).difference(self.upper(clock))
         }
+
+        delays
+    }
+
+    /// Computes the minimum change in upper bounds between the original and extrapolated zones.
+    ///
+    /// This method calculates, for each clock, the difference between its upper bound in the extrapolated zone
+    /// and its upper bound in the original zone. It then returns the minimum of these differences.
+    ///
+    /// Interpretation of the result:
+    /// - `Relation > 0`: All clocks' upper bounds increased, indicating that the extrapolated zone is more permissive.
+    /// - `Relation = 0`: At least one clock's upper bound remained unchanged, and none decreased; the extrapolated zone is equally or more permissive.
+    /// - `Relation < 0`: At least one clock's upper bound decreased, indicating that the extrapolated zone is more restrictive.
+    pub fn min_delay(&self, extrapolated: &Self) -> Relation {
+        self.delays(extrapolated).into_iter().min().unwrap()
+    }
+
+    /// Computes the maximum change in upper bounds between the original and extrapolated zones.
+    ///
+    /// This method calculates, for each clock, the difference between its upper bound in the
+    /// extrapolated zone and its upper bound in the original zone. It then returns the maximum of these differences.
+    ///
+    /// Interpretation of the result:
+    /// - `Relation > 0`: At least one clock's upper bound increased, indicating that the extrapolated zone is more permissive.
+    /// - `Relation = 0`: No change in upper bounds; the extrapolated zone is equally permissive as the original.
+    /// - `Relation < 0`: All clocks' upper bounds decreased, indicating that the extrapolated zone is more restrictive.
+    ///
+    pub fn max_delay(&self, extrapolated: &Self) -> Relation {
+        self.delays(extrapolated).into_iter().max().unwrap()
+    }
+
+    /// Shift this zone's upper bounds by `delay` in time.
+    ///
+    /// - `delay = +∞`: take the future (up) – all clocks become unbounded.
+    /// - `delay > 0`: relax each finite upper bound (no closure needed).
+    /// - `delay < 0`: tighten each finite upper bound, then re-canonicalize via `clean()`.
+    /// - `delay = 0`: no-op.
+    pub fn delay(mut self, delay: Relation) -> Result<Self, DBM<Unsafe>> {
+        if delay.is_infinity() {
+            self.up();
+            return Ok(self);
+        }
+
+        // Positive or zero delay → relax bounds on `self`.
+        if delay == ZERO {
+            return Ok(self);
+        } else if delay > ZERO {
+            for clock in (REFERENCE + 1)..self.dimensions() {
+                let upper = self.upper(clock);
+                if !upper.is_infinity() {
+                    self.set_upper(clock, upper + delay);
+                }
+            }
+            return Ok(self);
+        }
+
+        // Negative delay → tighten via a dirty DBM, then clean() to get the cannonical form (if possible).
+        let mut dirty_dbm = self.dirty();
+        for clock in (REFERENCE + 1)..dirty_dbm.dimensions() {
+            if !dirty_dbm.upper(clock).is_infinity() {
+                dirty_dbm[(clock, REFERENCE)] += delay;
+            }
+        }
+        dirty_dbm.clean()
     }
 }
 
@@ -1004,8 +964,6 @@ impl DBM<Dirty> {
         }
     }
 
-    // TODO: Should also return the delay which was applied. Such that for bounds
-    // only affecting the upper bounds should be the same as just delaying the DBM.
     pub fn extrapolate(mut self, bounds: Bounds) -> Result<Self, DBM<Unsafe>> {
         if let Some(clocks) = bounds.clocks() {
             // Check if the bounds describe a DBM with more clocks.
@@ -1053,6 +1011,10 @@ impl DBM<Dirty> {
                 }
 
                 for j in REFERENCE..self.dimensions() {
+                    if j == k {
+                        continue;
+                    }
+
                     let ij = self[(i, j)].clone();
                     let ik = self[(i, k)].clone();
                     let kj = self[(k, j)].clone();
@@ -1093,18 +1055,13 @@ impl IndexMut<(Clock, Clock)> for DBM<Dirty> {
 #[cfg(test)]
 mod tests {
 
-    use rand::distributions::uniform::UniformSampler;
-
     use crate::zones::{
         bounds::Bounds,
-        constraint::{
-            Relation, RelationsSample, Strictness, UniformRelations, INFINITY, REFERENCE, ZERO,
-        },
+        constraint::{Relation, Strictness},
         federation::Federation,
-        intervals::Interval,
     };
 
-    use super::{Canonical, Dirty, DBM};
+    use super::{Canonical, DBM};
 
     fn dbm1() -> DBM<Canonical> {
         let mut dbm = DBM::zero(2);
@@ -1155,6 +1112,84 @@ mod tests {
     }
 
     #[test]
+    fn test_dbm1() {
+        assert_eq!(
+            "-x < -1 ∧ x < 3 ∧ x - y < 1 ∧ -y < -2 ∧ y < 3 ∧ y - x < 2",
+            dbm1().fmt_conjunctions(&vec!["x", "y"])
+        )
+    }
+
+    #[test]
+    fn test_dbm2() {
+        assert_eq!(
+            "-x < -1 ∧ x < 4 ∧ x - y < 2 ∧ -y < -2 ∧ y < 4 ∧ y - x < 3",
+            dbm2().fmt_conjunctions(&vec!["x", "y"])
+        )
+    }
+
+    #[test]
+    fn test_dbm3() {
+        assert_eq!(
+            "-x ≤ 0 ∧ x ≤ 3 ∧ x - y ≤ 3 ∧ -y ≤ 0 ∧ y ≤ 4 ∧ y - x ≤ 4",
+            dbm3().fmt_conjunctions(&vec!["x", "y"])
+        )
+    }
+
+    #[test]
+    fn test_dbm4() {
+        assert_eq!(
+            "-x ≤ 0 ∧ x ≤ 1 ∧ x - y ≤ 1 ∧ -y ≤ 0 ∧ y ≤ 2 ∧ y - x ≤ 2",
+            dbm4().fmt_conjunctions(&vec!["x", "y"])
+        )
+    }
+
+    #[test]
+    fn dbm1_delay() {
+        let mut dbm = dbm1();
+        dbm = dbm.delay(Relation::weak(2)).ok().unwrap();
+        assert_eq!(
+            "-x < -1 ∧ x < 5 ∧ x - y < 1 ∧ -y < -2 ∧ y < 5 ∧ y - x < 2",
+            dbm.fmt_conjunctions(&vec!["x", "y"])
+        );
+        assert!(dbm.clone().delay(Relation::weak(-3)).is_err());
+    }
+
+    #[test]
+    fn dbm1_min_max_delay() {
+        let dbm = dbm1();
+        let extrapolated = dbm.clone().delay(Relation::weak(1)).ok().unwrap();
+        assert_eq!(
+            "-x < -1 ∧ x < 4 ∧ x - y < 1 ∧ -y < -2 ∧ y < 4 ∧ y - x < 2",
+            extrapolated.fmt_conjunctions(&vec!["x", "y"])
+        );
+        assert_eq!("(1, <)", dbm.min_delay(&extrapolated).to_string());
+        assert_eq!("(1, <)", dbm.max_delay(&extrapolated).to_string());
+    }
+
+    #[test]
+    fn dbm4_delay() {
+        let mut dbm = dbm4();
+        dbm = dbm.delay(Relation::weak(2)).ok().unwrap();
+        assert_eq!(
+            "-x ≤ 0 ∧ x ≤ 3 ∧ x - y ≤ 1 ∧ -y ≤ 0 ∧ y ≤ 4 ∧ y - x ≤ 2",
+            dbm.fmt_conjunctions(&vec!["x", "y"])
+        );
+        assert!(dbm.clone().delay(Relation::weak(-4)).is_err());
+    }
+
+    #[test]
+    fn dbm4_min_max_delay() {
+        let dbm = dbm4();
+        let extrapolated = dbm.clone().delay(Relation::weak(2)).ok().unwrap();
+        assert_eq!(
+            "-x ≤ 0 ∧ x ≤ 3 ∧ x - y ≤ 1 ∧ -y ≤ 0 ∧ y ≤ 4 ∧ y - x ≤ 2",
+            extrapolated.fmt_conjunctions(&vec!["x", "y"])
+        );
+        assert_eq!("(2, ≤)", dbm.min_delay(&extrapolated).to_string());
+        assert_eq!("(2, ≤)", dbm.max_delay(&extrapolated).to_string());
+    }
+
+    #[test]
     fn dmb1_relation() {
         let dbm = dbm1();
         let (subset, superset) = dbm.relation(&dbm);
@@ -1184,72 +1219,6 @@ mod tests {
         let (subset, superset) = dbm.relation(&dbm);
         assert!(subset);
         assert!(superset);
-    }
-
-    #[test]
-    fn dmb1_expanded_relation() {
-        let dbm = dbm1();
-        let expanded = dbm.clone().expand(Relation::new(10, Strictness::Weak));
-        let (subset, superset) = dbm.relation(&expanded);
-        let (r_subset, r_superset) = expanded.relation(&dbm);
-        assert!(subset);
-        assert!(!superset);
-        assert!(!r_subset);
-        assert!(r_superset);
-    }
-
-    #[test]
-    fn dmb2_expanded_relation() {
-        let dbm = dbm2();
-        let expanded = dbm.clone().expand(Relation::new(10, Strictness::Weak));
-        let (subset, superset) = dbm.relation(&expanded);
-        let (r_subset, r_superset) = expanded.relation(&dbm);
-        assert!(subset);
-        assert!(!superset);
-        assert!(!r_subset);
-        assert!(r_superset);
-    }
-
-    #[test]
-    fn dmb3_expanded_relation() {
-        let dbm = dbm3();
-        let expanded = dbm.clone().expand(Relation::new(10, Strictness::Weak));
-        let (subset, superset) = dbm.relation(&expanded);
-        let (r_subset, r_superset) = expanded.relation(&dbm);
-        assert!(subset);
-        assert!(!superset);
-        assert!(!r_subset);
-        assert!(r_superset);
-    }
-
-    #[test]
-    fn dmb4_expanded_relation() {
-        let dbm = dbm4();
-        let expanded = dbm.clone().expand(Relation::new(10, Strictness::Weak));
-        let (subset, superset) = dbm.relation(&expanded);
-        let (r_subset, r_superset) = expanded.relation(&dbm);
-        assert!(subset);
-        assert!(!superset);
-        assert!(!r_subset);
-        assert!(r_superset);
-    }
-
-    #[test]
-    fn sample_between_zero_and_a_bit_larger() {
-        let low = DBM::zero(2);
-        let high = low.clone().expand(Relation::new(16, Strictness::Weak));
-
-        let mut rng = rand::thread_rng();
-        let sampler = UniformRelations::new_inclusive(
-            RelationsSample::new(low.relations().clone().into()),
-            RelationsSample::new(high.relations().clone().into()),
-        );
-
-        for _ in 0..=10000 {
-            let sample = sampler.sample(&mut rng);
-            let dbm = DBM::<Dirty>::from_relations(sample.relations().into()).unwrap();
-            assert!(dbm.clean().is_ok())
-        }
     }
 
     #[test]
@@ -1481,345 +1450,5 @@ mod tests {
         incremental_federation = incremental_federation.subtract(&dbm4());
         assert!(!incremental_federation.includes_dbm(&dbm4()));
         incremental_federation.append(dbm4());
-    }
-
-    #[test]
-    fn constraining_clocks_dbm1() {
-        let dbm1 = dbm1();
-        assert_eq!(
-            "-x < -1 ∧ x < 3 ∧ x - y < 1 ∧ -y < -2 ∧ y < 3 ∧ y - x < 2",
-            dbm1.fmt_conjunctions(&vec!["x", "y"])
-        );
-        let delays = dbm1.delays();
-        assert_eq!(2, delays.len());
-        assert_eq!("(2, <)", delays[0].1.to_string());
-        assert_eq!("(1, <)", delays[1].1.to_string());
-        let max_delay = dbm1.max_delay();
-        assert_eq!("(1, <)", max_delay.to_string());
-        let constraining_clocks = dbm1.constraining_clocks();
-        assert_eq!(1, constraining_clocks.len());
-    }
-
-    #[test]
-    fn constraining_clocks_dbm2() {
-        let dbm2 = dbm2();
-        assert_eq!(
-            "-x < -1 ∧ x < 4 ∧ x - y < 2 ∧ -y < -2 ∧ y < 4 ∧ y - x < 3",
-            dbm2.fmt_conjunctions(&vec!["x", "y"])
-        );
-        let delays = dbm2.delays();
-        assert_eq!(2, delays.len());
-        assert_eq!("(3, <)", delays[0].1.to_string());
-        assert_eq!("(2, <)", delays[1].1.to_string());
-        let max_delay = dbm2.max_delay();
-        assert_eq!("(2, <)", max_delay.to_string());
-        let constraining_clocks = dbm2.constraining_clocks();
-        assert_eq!(1, constraining_clocks.len());
-    }
-
-    #[test]
-    fn constraining_clocks_dbm3() {
-        let dbm3 = dbm3();
-        assert_eq!(
-            "-x ≤ 0 ∧ x ≤ 3 ∧ x - y ≤ 3 ∧ -y ≤ 0 ∧ y ≤ 4 ∧ y - x ≤ 4",
-            dbm3.fmt_conjunctions(&vec!["x", "y"])
-        );
-        let delays = dbm3.delays();
-        assert_eq!(2, delays.len());
-        assert_eq!("(3, ≤)", delays[0].1.to_string());
-        assert_eq!("(4, ≤)", delays[1].1.to_string());
-        let max_delay = dbm3.max_delay();
-        assert_eq!("(3, ≤)", max_delay.to_string());
-        let constraining_clocks = dbm3.constraining_clocks();
-        assert_eq!(1, constraining_clocks.len());
-    }
-
-    #[test]
-    fn constraining_clocks_dbm4() {
-        let dbm4 = dbm4();
-        assert_eq!(
-            "-x ≤ 0 ∧ x ≤ 1 ∧ x - y ≤ 1 ∧ -y ≤ 0 ∧ y ≤ 2 ∧ y - x ≤ 2",
-            dbm4.fmt_conjunctions(&vec!["x", "y"])
-        );
-        let delays = dbm4.delays();
-        assert_eq!(2, delays.len());
-        assert_eq!("(1, ≤)", delays[0].1.to_string());
-        assert_eq!("(2, ≤)", delays[1].1.to_string());
-        let max_delay = dbm4.max_delay();
-        assert_eq!("(1, ≤)", max_delay.to_string());
-        let constraining_clocks = dbm4.constraining_clocks();
-        assert_eq!(1, constraining_clocks.len());
-    }
-
-    #[test]
-    fn common_max_delay_across_dbm1_dbm3() {
-        let mut dbm1 = dbm1();
-        let mut dbm3 = dbm3();
-        let max_delays = vec![dbm1.max_delay(), dbm3.max_delay()];
-        let min_max_delay = max_delays.iter().min().unwrap().clone();
-        let max_max_delay = max_delays.iter().max().unwrap().clone();
-        assert_eq!("(1, <)", min_max_delay.to_string());
-        assert_eq!("(3, ≤)", max_max_delay.to_string());
-
-        dbm3.set_max_delay(min_max_delay);
-        assert_eq!(min_max_delay, dbm3.max_delay());
-        assert!(dbm3.is_closed());
-        assert_eq!(
-            "-x ≤ 0 ∧ x < 1 ∧ x - y ≤ 3 ∧ -y ≤ 0 ∧ y ≤ 4 ∧ y - x ≤ 4",
-            dbm3.fmt_conjunctions(&vec!["x", "y"])
-        );
-
-        dbm1.set_max_delay(min_max_delay);
-        assert_eq!(min_max_delay, dbm1.max_delay());
-        assert!(dbm1.is_closed());
-        assert_eq!(
-            "-x < -1 ∧ x < 3 ∧ x - y < 1 ∧ -y < -2 ∧ y < 3 ∧ y - x < 2",
-            dbm1.fmt_conjunctions(&vec!["x", "y"])
-        );
-    }
-
-    #[test]
-    fn required_delays_dbm1_dbm3() {
-        let dbm1 = dbm1();
-        let dbm3 = dbm3();
-        assert_eq!(
-            "-x < -1 ∧ x < 3 ∧ x - y < 1 ∧ -y < -2 ∧ y < 3 ∧ y - x < 2",
-            dbm1.fmt_conjunctions(&vec!["x", "y"])
-        );
-        assert_eq!(
-            "-x ≤ 0 ∧ x ≤ 3 ∧ x - y ≤ 3 ∧ -y ≤ 0 ∧ y ≤ 4 ∧ y - x ≤ 4",
-            dbm3.fmt_conjunctions(&vec!["x", "y"])
-        );
-        assert_eq!("(1, 3)", dbm1.clock_interval(1).to_string());
-        assert_eq!("(2, 3)", dbm1.clock_interval(2).to_string());
-        assert_eq!("[0, 3]", dbm3.clock_interval(1).to_string());
-        assert_eq!("[0, 4]", dbm3.clock_interval(2).to_string());
-
-        let required_delays = dbm3.required_delays(&dbm1);
-        assert_eq!(2, required_delays.len());
-        assert_eq!("(1, 3)", required_delays[0].1.to_string());
-        assert_eq!("(2, 3)", required_delays[1].1.to_string());
-    }
-
-    #[test]
-    fn required_delays_dbm2_dbm3() {
-        let dbm2 = dbm2();
-        let dbm3 = dbm3();
-        assert_eq!(
-            "-x < -1 ∧ x < 4 ∧ x - y < 2 ∧ -y < -2 ∧ y < 4 ∧ y - x < 3",
-            dbm2.fmt_conjunctions(&vec!["x", "y"])
-        );
-        assert_eq!(
-            "-x ≤ 0 ∧ x ≤ 3 ∧ x - y ≤ 3 ∧ -y ≤ 0 ∧ y ≤ 4 ∧ y - x ≤ 4",
-            dbm3.fmt_conjunctions(&vec!["x", "y"])
-        );
-        assert_eq!("(1, 4)", dbm2.clock_interval(1).to_string());
-        assert_eq!("(2, 4)", dbm2.clock_interval(2).to_string());
-        assert_eq!("[0, 3]", dbm3.clock_interval(1).to_string());
-        assert_eq!("[0, 4]", dbm3.clock_interval(2).to_string());
-
-        let required_delays = dbm3.required_delays(&dbm2);
-        assert_eq!(2, required_delays.len());
-        assert_eq!("(1, 4)", required_delays[0].1.to_string());
-        assert_eq!("(2, 4)", required_delays[1].1.to_string());
-    }
-
-    #[test]
-    fn required_delays_dbm4_dbm3() {
-        let dbm4 = dbm4();
-        let dbm3 = dbm3();
-        assert_eq!(
-            "-x ≤ 0 ∧ x ≤ 1 ∧ x - y ≤ 1 ∧ -y ≤ 0 ∧ y ≤ 2 ∧ y - x ≤ 2",
-            dbm4.fmt_conjunctions(&vec!["x", "y"])
-        );
-        assert_eq!(
-            "-x ≤ 0 ∧ x ≤ 3 ∧ x - y ≤ 3 ∧ -y ≤ 0 ∧ y ≤ 4 ∧ y - x ≤ 4",
-            dbm3.fmt_conjunctions(&vec!["x", "y"])
-        );
-        assert_eq!("[0, 1]", dbm4.clock_interval(1).to_string());
-        assert_eq!("[0, 2]", dbm4.clock_interval(2).to_string());
-        assert_eq!("[0, 3]", dbm3.clock_interval(1).to_string());
-        assert_eq!("[0, 4]", dbm3.clock_interval(2).to_string());
-
-        let required_delays = dbm3.required_delays(&dbm4);
-        assert_eq!(2, required_delays.len());
-        assert_eq!("[0, 1]", required_delays[0].1.to_string());
-        assert_eq!("[0, 2]", required_delays[1].1.to_string());
-    }
-
-    #[test]
-    fn required_delays_edge_example_with_diagonals() {
-        let (x, y) = (1, 2);
-
-        // ORIGINAL: -x ≤ 0 ∧ x - y ≤ -6 ∧ -y ≤ -6 ∧ y - x < 23
-        let mut dbm = DBM::universe(2).dirty();
-        dbm.set(x, y, Relation::weak(-6));
-        dbm.set_lower(y, Relation::weak(-6));
-        dbm.set(y, x, Relation::strict(23));
-        let dbm = dbm.close().ok().unwrap();
-        assert_eq!(
-            "-x ≤ 0 ∧ x - y ≤ -6 ∧ -y ≤ -6 ∧ y - x < 23",
-            dbm.fmt_conjunctions(&vec!["x", "y"])
-        );
-
-        // EDGE 1: -x ≤ 0 ∧ x ≤ 15 ∧ x - y ≤ -6 ∧ -y ≤ -6 ∧ y < 38 ∧ y - x < 23
-        let mut dbm_e1 = dbm.clone().dirty();
-        dbm_e1.set_upper(x, Relation::weak(15));
-        let dbm_e1 = dbm_e1.close().ok().unwrap();
-        assert_eq!(
-            "-x ≤ 0 ∧ x ≤ 15 ∧ x - y ≤ -6 ∧ -y ≤ -6 ∧ y < 38 ∧ y - x < 23",
-            dbm_e1.fmt_conjunctions(&vec!["x", "y"])
-        );
-
-        // EDGE 2: -x < -10 ∧ x - y ≤ -6 ∧ -y < -16 ∧ y - x < 23
-        let mut dbm_e2 = dbm.clone().dirty();
-        dbm_e2.set_lower(x, Relation::strict(-10));
-        let dbm_e2 = dbm_e2.close().ok().unwrap();
-        assert_eq!(
-            "-x < -10 ∧ x - y ≤ -6 ∧ -y < -16 ∧ y - x < 23",
-            dbm_e2.fmt_conjunctions(&vec!["x", "y"])
-        );
-
-        let required_delay_e1 = dbm.required_delay(&dbm_e1);
-        let required_delay_e2 = dbm.required_delay(&dbm_e2);
-        let enabled_at_the_same_time = required_delay_e1.intersection(&required_delay_e2).is_some();
-
-        assert_eq!("[0, 15]", required_delay_e1.to_string());
-        assert_eq!("(10, ∞]", required_delay_e2.to_string());
-        assert!(enabled_at_the_same_time);
-    }
-
-    #[test]
-    fn max_delay_changed_example_1() {
-        let (x, y) = (1, 2);
-
-        let before = DBM::universe(2);
-        assert_eq!("-x ≤ 0 ∧ -y ≤ 0", before.fmt_conjunctions(&vec!["x", "y"]));
-
-        let mut after = DBM::universe(2).dirty();
-        after.set_lower(x, Relation::weak(-3));
-        after.set_lower(y, Relation::strict(-6));
-        let after = after.close().ok().unwrap();
-        assert_eq!("-x ≤ -3 ∧ -y < -6", after.fmt_conjunctions(&vec!["x", "y"]));
-
-        let max_delay_before = before.max_delay();
-        let max_delay_after = after.max_delay();
-
-        assert_eq!("(∞, ≤)", max_delay_before.to_string());
-        assert_eq!("(∞, ≤)", max_delay_after.to_string());
-
-        let max_common_delay = max_delay_after.min(max_delay_before);
-        assert_eq!("(∞, ≤)", max_common_delay.to_string());
-
-        let required_delay = before.required_delay(&after);
-        assert_eq!("(6, ∞]", required_delay.to_string());
-    }
-
-    #[test]
-    fn max_delay_changed_example_2() {
-        let (x, y) = (1, 2);
-
-        let before = DBM::universe(2);
-        assert_eq!("-x ≤ 0 ∧ -y ≤ 0", before.fmt_conjunctions(&vec!["x", "y"]));
-
-        let mut after = DBM::universe(2).dirty();
-        after.set_lower(x, Relation::weak(-3));
-        after.set_lower(y, Relation::strict(-6));
-        after.set_upper(x, Relation::weak(91));
-        after.set_upper(y, Relation::strict(91));
-        let after = after.close().ok().unwrap();
-        assert_eq!(
-            "-x ≤ -3 ∧ x ≤ 91 ∧ x - y < 85 ∧ -y < -6 ∧ y < 91 ∧ y - x < 88",
-            after.fmt_conjunctions(&vec!["x", "y"])
-        );
-
-        let max_delay_before = before.max_delay();
-        let max_delay_after = after.max_delay();
-
-        assert_eq!("(∞, ≤)", max_delay_before.to_string());
-        assert_eq!("(85, <)", max_delay_after.to_string());
-
-        let max_common_delay = max_delay_after.min(max_delay_before);
-        assert_eq!("(85, <)", max_common_delay.to_string());
-
-        let required_delay = before.required_delay(&after);
-        assert_eq!("(6, 91)", required_delay.to_string());
-    }
-
-    #[test]
-    fn max_delay_changed_example_3() {
-        let (x, y) = (1, 2);
-
-        let mut before = DBM::universe(2);
-        assert_eq!("-x ≤ 0 ∧ -y ≤ 0", before.fmt_conjunctions(&vec!["x", "y"]));
-
-        let mut after = DBM::universe(2).dirty();
-        after.set_lower(x, Relation::weak(-3));
-        after.set_lower(y, Relation::strict(-6));
-        after.set_upper(x, Relation::weak(91));
-        after.set_upper(y, Relation::strict(91));
-        let after = after.close().ok().unwrap();
-        assert_eq!(
-            "-x ≤ -3 ∧ x ≤ 91 ∧ x - y < 85 ∧ -y < -6 ∧ y < 91 ∧ y - x < 88",
-            after.fmt_conjunctions(&vec!["x", "y"])
-        );
-
-        let max_delay_before = before.max_delay();
-        let max_delay_after = after.max_delay();
-
-        assert_eq!("(∞, ≤)", max_delay_before.to_string());
-        assert_eq!("(85, <)", max_delay_after.to_string());
-
-        let max_common_delay = max_delay_after.min(max_delay_before);
-        assert_eq!("(85, <)", max_common_delay.to_string());
-
-        let required_delay = before.required_delay(&after);
-        assert_eq!("(6, 91)", required_delay.to_string());
-
-        before.set_max_delay(max_common_delay);
-        assert_eq!(
-            "-x ≤ 0 ∧ x < 85 ∧ -y ≤ 0 ∧ y < 85",
-            before.fmt_conjunctions(&vec!["x", "y"])
-        );
-    }
-
-    #[test]
-    fn required_delay_regression() {
-        // pair.implementation -x ≤ 0 ∧ -y ≤ 0 ∧ y < 2 ∧ y - x ≤ 0
-        // implementation_state -x ≤ -2 ∧ -y ≤ 0 ∧ y < 2 ∧ y - x < 0
-        // overall_lower (2, ≤)
-        // overall_upper (2, <)
-        let (x, y) = (1, 2);
-
-        let mut before = DBM::universe(2).dirty();
-        before.set_upper(y, Relation::strict(2));
-        before.set(y, x, Relation::weak(0));
-        let before = before.close().ok().unwrap();
-        assert_eq!(
-            "-x ≤ 0 ∧ -y ≤ 0 ∧ y < 2 ∧ y - x ≤ 0",
-            before.fmt_conjunctions(&vec!["x", "y"])
-        );
-
-        let mut after = before.clone().dirty();
-        after.set_lower(x, Relation::weak(-2));
-        let after = after.close().ok().unwrap();
-        assert_eq!(
-            "-x ≤ -2 ∧ -y ≤ 0 ∧ y < 2 ∧ y - x < 0",
-            after.fmt_conjunctions(&vec!["x", "y"])
-        );
-
-        assert_eq!("[0, ∞]", before.clock_interval(x).to_string());
-        assert_eq!("[0, 2)", before.clock_interval(y).to_string());
-        assert_eq!("[2, ∞]", after.clock_interval(x).to_string());
-        assert_eq!("[0, 2)", after.clock_interval(y).to_string());
-
-        let before_max_delay = before.max_delay();
-        let after_max_delay = after.max_delay();
-        assert_eq!("(2, <)", before_max_delay.to_string());
-        assert_eq!("(2, <)", after_max_delay.to_string());
-
-        let required_delays = before.required_delays(&after);
-        assert_eq!("[2, ∞]", required_delays[0].1.to_string());
-        assert_eq!("[0, 2)", required_delays[1].1.to_string());
     }
 }
