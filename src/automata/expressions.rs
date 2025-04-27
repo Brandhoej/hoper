@@ -33,7 +33,7 @@ impl Display for Unary {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Copy)]
 pub enum Comparison {
     LessThanOrEqual,
     LessThan,

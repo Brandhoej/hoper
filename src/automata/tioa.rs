@@ -73,16 +73,16 @@ impl EdgeTree {
         Self::Identity
     }
 
+    pub const fn is_identity(&self) -> bool {
+        matches!(self, EdgeTree::Identity)
+    }
+
     pub fn branches(
         locations: impl Iterator<Item = impl Iterator<Item = Self> + Clone>,
     ) -> impl Iterator<Item = Self> {
         locations
             .multi_cartesian_product()
             .map(|locations| Self::Branch(locations))
-    }
-
-    pub fn is_identity(&self) -> bool {
-        matches!(self, Self::Identity)
     }
 }
 
@@ -104,7 +104,7 @@ impl Display for EdgeTree {
                     .map(|location| format!("{}", location))
                     .join(", ")
             ),
-            EdgeTree::Identity => write!(f, ""),
+            EdgeTree::Identity => Ok(()),
         }
     }
 }
@@ -136,15 +136,17 @@ impl Traversal {
     }
 
     pub fn conjoin(traversals: Vec<Traversal>) -> Traversal {
-        let locations = traversals
-            .iter()
-            .map(|traversal| traversal.destination().clone())
-            .collect();
-        let edges = traversals
-            .iter()
-            .map(|traversal| traversal.edge().clone())
-            .collect();
-        Traversal::step(EdgeTree::branch(edges), LocationTree::new_branch(locations))
+        let (locations, edges): (Vec<_>, Vec<_>) = traversals
+            .into_iter()
+            .map(|t| (t.destination().clone(), t.edge().clone()))
+            .unzip();
+
+        let combined_edge = match edges.as_slice() {
+            [single] => single.clone(),
+            _ => EdgeTree::branch(edges),
+        };
+
+        Traversal::step(combined_edge, LocationTree::new_branch(locations))
     }
 
     pub fn combinations(

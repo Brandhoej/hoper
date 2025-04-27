@@ -4,7 +4,7 @@ use crate::zones::constraint::Clock;
 
 use super::{
     action::Action,
-    channel::{self, Channel},
+    channel::Channel,
     edge::Edge,
     ioa::IOA,
     location::Location,

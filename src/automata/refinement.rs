@@ -3,10 +3,7 @@ use std::collections::{HashSet, VecDeque};
 use itertools::Itertools;
 use petgraph::graph::NodeIndex;
 
-use crate::{
-    automata::tiots::TIOTS,
-    zones::constraint::{Relation, INFINITY, ZERO},
-};
+use crate::automata::tiots::TIOTS;
 
 use super::{
     action::Action,
@@ -15,7 +12,7 @@ use super::{
     specification::Specification,
     state_set::StateSet,
     tioa::{LocationTree, Traversal, TIOA},
-    tiots::State,
+    tiots::{State, Transition},
 };
 
 #[derive(Clone)]
@@ -32,7 +29,7 @@ impl RefinementStatePair {
         }
     }
 
-    pub fn from_states(implementation: State, mut specification: State) -> Result<Self, ()> {
+    pub fn from_states(implementation: State, specification: State) -> Result<Self, ()> {
         Ok(RefinementStatePair::new(implementation, specification))
     }
 
@@ -186,7 +183,9 @@ impl Refinement {
         // An example where work is shared between threads can be seen here:
         // https://docs.rs/crossbeam/latest/crossbeam/deque/index.html
 
-        let mut implementation_passed: StateSet = StateSet::new();
+        todo!()
+
+        /*let mut implementation_passed: StateSet = StateSet::new();
         let mut specification_passed: StateSet = StateSet::new();
         let mut worklist: VecDeque<(NodeIndex, NodeIndex, RefinementStatePair)> = VecDeque::new();
 
@@ -218,22 +217,21 @@ impl Refinement {
         };
 
         while let Some((source_implementation, source_specification, pair)) = worklist.pop_front() {
-            let mut products: Vec<
-                Box<dyn Iterator<Item = ((State, Traversal), (State, Traversal))>>,
-            > = Vec::with_capacity(4);
+            let mut products: Vec<Box<dyn Iterator<Item = (Transition, Transition)>>> =
+                Vec::with_capacity(4);
             // Rule 1 (Common inputs): Both the specification and implementaion can react on the input.
             // Whenever t -i?->ᵀ t' for some t' ∈ Qᵀ and i? ∈ Actᵀᵢ ∩ Actᔆᵢ , then s -i?->ᔆ s' and (s', t') ∈ R for some s' ∈ Qᔆ
             for action in self.common_inputs.iter() {
                 let channel = action.input();
                 let mut specification_states = self
                     .specification
-                    .enabled(&pair.specification(), channel.clone())
+                    .enabled(&pair.specification(), &channel)
                     .into_iter()
                     .peekable();
 
                 let mut implementation_states = self
                     .implementation
-                    .enabled(&pair.implementation(), channel.clone())
+                    .enabled(&pair.implementation(), &channel)
                     .into_iter()
                     .peekable();
 
@@ -253,7 +251,7 @@ impl Refinement {
                 let channel = action.input();
                 let mut specification_states = self
                     .specification
-                    .enabled(pair.specification(), channel)
+                    .enabled(pair.specification(), &channel)
                     .into_iter()
                     .peekable();
 
@@ -261,7 +259,7 @@ impl Refinement {
                 // Because of this of this, they would all in all states be able to react to all inputs.
                 assert!(specification_states.peek().is_some());
 
-                let implementation_states = vec![(
+                let implementation_states = vec![Transition::discrete(
                     pair.implementation().clone(),
                     Traversal::stay(pair.implementation().location().clone()),
                 )];
@@ -279,7 +277,7 @@ impl Refinement {
                 let channel = action.output();
                 let mut implementation_states = self
                     .implementation
-                    .enabled(pair.implementation(), channel.clone())
+                    .enabled(pair.implementation(), &channel)
                     .into_iter()
                     .peekable();
 
@@ -292,22 +290,9 @@ impl Refinement {
                 // The specification should be able to produce the output since the implementation can.
                 let mut specification_states = self
                     .specification
-                    .enabled(pair.specification(), channel.clone())
+                    .enabled(pair.specification(), &channel)
                     .into_iter()
                     .peekable();
-
-                println!(
-                    "Implementation {}: {}",
-                    pair.implementation().location(),
-                    pair.implementation()
-                        .ref_zone()
-                        .fmt_conjunctions(&vec!["x", "y", "z"])
-                );
-                println!(
-                    "Specification {}: {}",
-                    pair.specification().location(),
-                    pair.specification().ref_zone().fmt_conjunctions(&vec!["u"])
-                );
 
                 // The specification could not produce the output the implementation could.
                 if specification_states.peek().is_none() {
@@ -333,7 +318,7 @@ impl Refinement {
                 let channel = action.output();
                 let mut implementation_states = self
                     .implementation
-                    .enabled(pair.implementation(), channel.clone())
+                    .enabled(pair.implementation(), &channel)
                     .into_iter()
                     .peekable();
 
@@ -341,7 +326,7 @@ impl Refinement {
                     continue;
                 }
 
-                let specification_states = vec![(
+                let specification_states = vec![Transition::discrete(
                     pair.specification().clone(),
                     Traversal::stay(pair.specification().location().clone()),
                 )];
@@ -354,11 +339,7 @@ impl Refinement {
             }
 
             for product in products {
-                for (
-                    (mut implementation_state, implementation_traversal),
-                    (mut specification_state, specification_traversal),
-                ) in product
-                {
+                for ((mut implementation_transition), (mut specification_transition)) in product {
                     // Checks the required delay which is used to check if they are enabled at the same time.
                     /*let required_delay_implementation = pair
                         .implementation
@@ -378,13 +359,13 @@ impl Refinement {
                     todo!();
 
                     // Performs the edge's update.
-                    implementation_state = self
+                    /*let implementation_state = self
                         .implementation
-                        .traverse(implementation_state, &implementation_traversal)
+                        .transition(implementation_transition)
                         .unwrap();
-                    specification_state = self
+                    let specification_state = self
                         .specification
-                        .traverse(specification_state, &specification_traversal)
+                        .transition(specification_transition)
                         .unwrap();
 
                     // TODO: Perform synchronous delays.
@@ -433,7 +414,7 @@ impl Refinement {
                                 specification_computation_tree,
                             ));
                         }
-                    };
+                    };*/
                 }
             }
 
@@ -444,6 +425,6 @@ impl Refinement {
         Ok((
             implementation_computation_tree,
             specification_computation_tree,
-        ))
+        ))*/
     }
 }

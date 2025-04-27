@@ -6,6 +6,7 @@ mod tests {
         action::Action,
         automaton::{Automaton, IntoAutomaton},
         automaton_builder::AutomatonBuilder,
+        channel::Channel,
         composition::Composition,
         expressions::{Comparison, Expression},
         input_enabled::InputEnabled,
@@ -13,20 +14,19 @@ mod tests {
         partitioned_symbol_table::PartitionedSymbolTable,
         refinement::Refinement,
         statements::Statement,
-        tioa::{LocationTree, TIOA},
     };
 
-    fn new_specification(symbols: &mut PartitionedSymbolTable) -> Automaton {
+    fn new_specification(partition: u32, symbols: &mut PartitionedSymbolTable) -> Automaton {
         let mut builder = AutomatonBuilder::new(symbols);
         // Global declarations:
         let grant = builder.add_symbol(0, "grant");
         let news = builder.add_symbol(0, "news");
 
         // Local declarations:
-        let clock = builder.add_clock(1, "u");
-        let loc0_symbol = builder.add_symbol(1, "0");
-        let loc1_symbol = builder.add_symbol(1, "1");
-        let loc2_symbol = builder.add_symbol(1, "2");
+        let clock = builder.add_clock(partition, "u");
+        let loc0_symbol = builder.add_symbol(partition, "0");
+        let loc1_symbol = builder.add_symbol(partition, "1");
+        let loc2_symbol = builder.add_symbol(partition, "2");
 
         // Build
         let reset_u = Statement::reset(clock, 0);
@@ -58,7 +58,7 @@ mod tests {
         builder.build().unwrap()
     }
 
-    fn new_administration(symbols: &mut PartitionedSymbolTable) -> Automaton {
+    fn new_administration(partition: u32, symbols: &mut PartitionedSymbolTable) -> Automaton {
         let mut builder = AutomatonBuilder::new(symbols);
         // Global declarations:
         let grant = builder.add_symbol(0, "grant");
@@ -67,11 +67,11 @@ mod tests {
         let coin = builder.add_symbol(0, "coin");
 
         // Local declarations:
-        let clock = builder.add_clock(2, "z");
-        let loc0_symbol = builder.add_symbol(2, "0");
-        let loc1_symbol = builder.add_symbol(2, "1");
-        let loc2_symbol = builder.add_symbol(2, "2");
-        let loc3_symbol = builder.add_symbol(2, "3");
+        let clock = builder.add_clock(partition, "z");
+        let loc0_symbol = builder.add_symbol(partition, "0");
+        let loc1_symbol = builder.add_symbol(partition, "1");
+        let loc2_symbol = builder.add_symbol(partition, "2");
+        let loc3_symbol = builder.add_symbol(partition, "3");
 
         // Build
         let reset_z = Statement::reset(clock, 0);
@@ -272,7 +272,7 @@ mod tests {
     #[test]
     fn specification() {
         let mut symbols = PartitionedSymbolTable::new();
-        let specification = new_specification(&mut symbols);
+        let specification = new_specification(1, &mut symbols);
 
         /*let contextual_automaton = specification.in_context(&symbols);
         println!("{}", contextual_automaton.dot());*/
@@ -286,7 +286,7 @@ mod tests {
     #[test]
     fn administration() {
         let mut symbols = PartitionedSymbolTable::new();
-        let administration = new_administration(&mut symbols);
+        let administration = new_administration(2, &mut symbols);
 
         /*let contextual_automaton = administration.in_context(&symbols);
         println!("{}", contextual_automaton.dot());*/
@@ -341,7 +341,6 @@ mod tests {
 
     #[test]
     fn machine_researcher() {
-        // HERE!
         let mut symbols = PartitionedSymbolTable::new();
         let publication = symbols.intern(0, "publication");
         let coin = symbols.intern(0, "coin");
@@ -369,6 +368,48 @@ mod tests {
         )
         .unwrap();
 
+        assert_eq!(composition.common_actions().try_len().unwrap(), 2);
+        assert!(composition.common_actions().contains(&Action::new(tea)));
+        assert!(composition.common_actions().contains(&Action::new(coffee)));
+
+        assert_eq!(composition.lhs_unique_actions().try_len().unwrap(), 1);
+        assert!(composition
+            .lhs_unique_actions()
+            .contains(&Action::new(publication)));
+
+        assert_eq!(composition.rhs_unique_actions().try_len().unwrap(), 1);
+        assert!(composition
+            .rhs_unique_actions()
+            .contains(&Action::new(coin)));
+
+        assert_eq!(composition.inputs().len(), 1);
+        assert!(composition.inputs().contains(&Action::new(coin)));
+
+        assert_eq!(composition.outputs().len(), 3);
+        assert!(composition.outputs().contains(&Action::new(publication)));
+        assert!(composition.outputs().contains(&Action::new(coffee)));
+        assert!(composition.outputs().contains(&Action::new(tea)));
+
+        assert_eq!(composition.actions().len(), 4);
+        assert!(composition.actions().contains(&Action::new(publication)));
+        assert!(composition.actions().contains(&Action::new(coffee)));
+        assert!(composition.actions().contains(&Action::new(tea)));
+        assert!(composition.actions().contains(&Action::new(coin)));
+
+        assert_eq!(composition.channels().len(), 4);
+        assert!(composition
+            .channels()
+            .contains(&Channel::Out(Action::new(publication))));
+        assert!(composition
+            .channels()
+            .contains(&Channel::Out(Action::new(coffee))));
+        assert!(composition
+            .channels()
+            .contains(&Channel::Out(Action::new(tea))));
+        assert!(composition
+            .channels()
+            .contains(&Channel::In(Action::new(coin))));
+
         let automaton = composition.into_automaton().unwrap();
         let contextual_automaton = automaton.in_context(&symbols);
         println!("{}", contextual_automaton.dot());
@@ -382,13 +423,13 @@ mod tests {
         assert!(automaton.outputs().contains(&Action::new(coffee)));
 
         assert_eq!(automaton.node_iter().try_len().unwrap(), 8);
-        assert_eq!(automaton.edge_iter().try_len().unwrap(), 29);
+        assert_eq!(automaton.edge_iter().try_len().unwrap(), 28);
     }
 
     #[test]
     fn specification_refines_self() {
         let mut symbols = PartitionedSymbolTable::new();
-        let specification = new_specification(&mut symbols);
+        let specification = new_specification(1, &mut symbols);
 
         let refinement = Refinement::new(
             specification.clone().is_input_enabled().unwrap(),
@@ -402,7 +443,7 @@ mod tests {
     #[test]
     fn administration_refines_self() {
         let mut symbols = PartitionedSymbolTable::new();
-        let administration = new_administration(&mut symbols);
+        let administration = new_administration(2, &mut symbols);
 
         let refinement = Refinement::new(
             administration.clone().is_input_enabled().unwrap(),
@@ -416,8 +457,8 @@ mod tests {
     #[test]
     fn specification_administration() {
         let mut symbols = PartitionedSymbolTable::new();
-        let specification = new_specification(&mut symbols);
-        let administration = new_administration(&mut symbols);
+        let specification = new_specification(1, &mut symbols);
+        let administration = new_administration(2, &mut symbols);
         let composition = Composition::new(
             administration.is_input_enabled().unwrap(),
             specification.is_input_enabled().unwrap(),
@@ -458,7 +499,7 @@ mod tests {
     fn machine_administration_refines_self() {
         let mut symbols = PartitionedSymbolTable::new();
         let machine = new_machine(3, &mut symbols);
-        let administration = new_administration(&mut symbols);
+        let administration = new_administration(2, &mut symbols);
         let composition = Composition::new(
             administration.is_input_enabled().unwrap(),
             machine.is_input_enabled().unwrap(),
@@ -500,7 +541,7 @@ mod tests {
     fn administration_researcher_refines_self() {
         // FAILS!
         let mut symbols = PartitionedSymbolTable::new();
-        let administration = new_administration(&mut symbols);
+        let administration = new_administration(2, &mut symbols);
         let researcher = new_researcher(5, &mut symbols);
         let composition = Composition::new(
             researcher.is_input_enabled().unwrap(),
@@ -521,7 +562,7 @@ mod tests {
     fn machine_administration_researcher_refines_self() {
         // FAILS! Same as "machine_researcher"
         let mut symbols = PartitionedSymbolTable::new();
-        let administration = new_administration(&mut symbols);
+        let administration = new_administration(2, &mut symbols);
         let researcher = new_researcher(5, &mut symbols);
         let machine = new_machine(3, &mut symbols);
         let researcher_administration = Composition::new(
@@ -548,7 +589,7 @@ mod tests {
     fn machine_administration_researcher_refines_specification() {
         // FAILS!
         let mut symbols = PartitionedSymbolTable::new();
-        let administration = new_administration(&mut symbols);
+        let administration = new_administration(2, &mut symbols);
         let researcher = new_researcher(5, &mut symbols);
         let machine = new_machine(3, &mut symbols);
         let researcher_administration = Composition::new(
@@ -561,7 +602,7 @@ mod tests {
             Box::new(researcher_administration.into()),
         )
         .unwrap();
-        let specification = new_specification(&mut symbols);
+        let specification = new_specification(1, &mut symbols);
 
         let refinement = Refinement::new(
             Box::new(machine_researcher_administration.clone().into()),
@@ -626,7 +667,7 @@ mod tests {
         let tea = symbols.intern(0, "tea");
         let coffee = symbols.intern(0, "coffee");
 
-        let administration = new_administration(&mut symbols);
+        let administration = new_administration(2, &mut symbols);
         let researcher = new_researcher(5, &mut symbols);
         let machine = new_machine(3, &mut symbols);
         let researcher_administration = Composition::new(
@@ -640,7 +681,7 @@ mod tests {
         )
         .unwrap();
 
-        let specification = new_specification(&mut symbols);
+        let specification = new_specification(1, &mut symbols);
 
         assert_eq!(1, specification.inputs().try_len().unwrap());
         assert!(specification.inputs().contains(&Action::new(grant)));

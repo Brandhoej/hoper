@@ -185,6 +185,20 @@ impl Relation {
         Self::new(limit, Strictness::Strict)
     }
 
+    pub fn clamp(self, min: Self, max: Self) -> Self {
+        if max < min {
+            panic!("max is less than min");
+        }
+
+        if self < min {
+            return min;
+        } else if self > max {
+            return max;
+        } else {
+            return self;
+        }
+    }
+
     /// Returns the limit of the relation which can be
     /// represented with one less bit than the relation
     /// as the last bit describes the relation's strictness.

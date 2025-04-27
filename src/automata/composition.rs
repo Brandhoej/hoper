@@ -4,7 +4,7 @@ use crate::zones::constraint::Clock;
 
 use super::{
     action::Action,
-    channel::Channel,
+    channel::{self, Channel},
     edge::Edge,
     ioa::IOA,
     location::Location,
@@ -129,6 +129,28 @@ impl Composition {
     pub fn rhs_unique_actions(&self) -> impl Iterator<Item = &Action> {
         self.rhs_unique_actions.iter()
     }
+
+    fn lhs_outgoing_traversals(
+        &self,
+        source: &LocationTree,
+        channel: Channel,
+    ) -> Result<Vec<Traversal>, ()> {
+        self.lhs
+            .channel(*channel.action())
+            .ok_or(())
+            .and_then(|channel| self.lhs.outgoing_traversals(source, channel))
+    }
+
+    fn rhs_outgoing_traversals(
+        &self,
+        source: &LocationTree,
+        channel: Channel,
+    ) -> Result<Vec<Traversal>, ()> {
+        self.rhs
+            .channel(*channel.action())
+            .ok_or(())
+            .and_then(|channel| self.rhs.outgoing_traversals(source, channel))
+    }
 }
 
 impl TA for Composition {
@@ -224,20 +246,18 @@ impl TIOA for Composition {
     }
 
     fn location(&self, tree: &LocationTree) -> Result<Location, ()> {
-        if let LocationTree::Branch(locations) = tree {
-            if locations.len() != 2 {
-                return Err(());
+        match tree {
+            LocationTree::Branch(locations) if locations.len() == 2 => {
+                let lhs_location = self.lhs.location(&locations[0])?;
+                let rhs_location = self.rhs.location(&locations[1])?;
+
+                return Ok(Location::combine(
+                    vec![lhs_location, rhs_location].into_iter(),
+                ));
             }
 
-            let lhs_location = self.lhs.location(&locations[0])?;
-            let rhs_location = self.rhs.location(&locations[1])?;
-
-            return Ok(Location::combine(
-                vec![lhs_location, rhs_location].into_iter(),
-            ));
+            _ => Err(()),
         }
-
-        Err(())
     }
 
     fn edge(&self, tree: &EdgeTree) -> Result<Edge, ()> {
@@ -286,10 +306,8 @@ mod tests {
     use crate::automata::{
         automaton::{Automaton, IntoAutomaton},
         automaton_builder::AutomatonBuilder,
-        expressions::{Comparison, Expression},
         input_enabled::InputEnabled,
         partitioned_symbol_table::PartitionedSymbolTable,
-        statements::Statement,
     };
 
     use super::Composition;
