@@ -285,16 +285,6 @@ impl Relation {
         Self::new(-self.limit(), self.strictness().opposite())
     }
 
-    /// Determines whether applying `self` tightens the constraint between two clock values.
-    pub const fn tightens(self, from: Self, to: Self) -> bool {
-        from.0 > self.0 && self.negation().0 < to.0
-    }
-
-    /// Determines whether applying `self` loosens the constraint between two clock values.
-    pub const fn loosens(self, from: Self, to: Self) -> bool {
-        from.0 < self.0 && self.negation().0 > to.0
-    }
-
     /// Returns the sum of two constraints. The sum is satisfies both original constraints (lhs/rhs).
     /// In other words, it does not allow any behavior that violates either of the
     /// original constraints. to ensure that the sum captures the intersection of the

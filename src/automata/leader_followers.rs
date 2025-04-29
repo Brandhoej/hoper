@@ -80,7 +80,7 @@ impl HTIOTS for LeaderFollowers {
 
         // If the leader did not delay but instead got more permissive then it is the same as no delay.
         let mut leader_delay = delays[self.leader];
-        println!("leader delay {:?}", leader_delay);
+        println!("Leader delay {}", leader_delay.unwrap());
         if leader_delay.is_none() {
             leader_delay = Some(ZERO);
         }
@@ -152,17 +152,21 @@ mod tests {
 
     use itertools::Itertools;
 
-    use crate::automata::{
-        automaton::Automaton,
-        automaton_builder::AutomatonBuilder,
-        expressions::{Comparison, Expression},
-        htiots::HTIOTS,
-        partitioned_symbol_table::PartitionedSymbolTable,
-        ta::TA,
+    use crate::{
+        automata::{
+            automaton::Automaton,
+            automaton_builder::AutomatonBuilder,
+            expressions::{Comparison, Expression},
+            htiots::{HyperState, HTIOTS},
+            partitioned_symbol_table::PartitionedSymbolTable,
+            ta::TA,
+        },
+        zones::constraint::Relation,
     };
 
     use super::LeaderFollowers;
 
+    /// Automaton with unbounded delay on initial location.
     fn new_automaton0(partition: u32, symbols: &mut PartitionedSymbolTable) -> Automaton {
         let mut builder = AutomatonBuilder::new(symbols);
 
@@ -177,6 +181,7 @@ mod tests {
         builder.build().unwrap()
     }
 
+    /// Automaton with bounded delay on initial location.
     fn new_automaton1(partition: u32, symbols: &mut PartitionedSymbolTable) -> Automaton {
         let mut builder = AutomatonBuilder::new(symbols);
 
@@ -199,8 +204,8 @@ mod tests {
         let mut symbols = PartitionedSymbolTable::new();
         let automaton = new_automaton0(0, &mut symbols);
 
-        let contextual_automaton = automaton.in_context(&symbols);
-        println!("{}", contextual_automaton.dot());
+        /*let contextual_automaton = automaton.in_context(&symbols);
+        println!("{}", contextual_automaton.dot());*/
 
         assert_eq!(automaton.clock_count(), 1);
         assert_eq!(automaton.inputs().try_len().unwrap(), 0);
@@ -214,8 +219,8 @@ mod tests {
         let mut symbols = PartitionedSymbolTable::new();
         let automaton = new_automaton1(0, &mut symbols);
 
-        let contextual_automaton = automaton.in_context(&symbols);
-        println!("{}", contextual_automaton.dot());
+        /*let contextual_automaton = automaton.in_context(&symbols);
+        println!("{}", contextual_automaton.dot());*/
 
         assert_eq!(automaton.clock_count(), 1);
         assert_eq!(automaton.inputs().try_len().unwrap(), 0);
@@ -265,7 +270,7 @@ mod tests {
             0,
         );
 
-        let mut state = leader_follower.initial_state();
+        let state = leader_follower.initial_state();
         {
             let (leader_state, follower_state) = (&state[0], &state[1]);
             assert_eq!(
@@ -278,16 +283,74 @@ mod tests {
             );
         }
 
-        state = leader_follower.delay(state).ok().unwrap();
-        let (leader_state, follower_state) = (&state[0], &state[1]);
-        assert_eq!(
-            "-x ≤ 0 ∧ x ≤ 20",
-            leader_state.zone().fmt_conjunctions(&vec!["x"])
-        );
-        assert_eq!(
-            "-x ≤ 0 ∧ x ≤ 20",
-            follower_state.zone().fmt_conjunctions(&vec!["x"])
-        );
+        {
+            let state = leader_follower.delay(state.clone()).ok().unwrap();
+            let (leader_state, follower_state) = (&state[0], &state[1]);
+            assert_eq!(
+                "-x ≤ 0 ∧ x ≤ 20",
+                leader_state.zone().fmt_conjunctions(&vec!["x"])
+            );
+            assert_eq!(
+                "-x ≤ 0 ∧ x ≤ 20",
+                follower_state.zone().fmt_conjunctions(&vec!["x"])
+            );
+        }
+
+        {
+            let states: Vec<_> = state.clone().into_iter().collect();
+            let [mut leader_state, follower_state] = states.try_into().unwrap();
+            leader_state = leader_state
+                .tighten_lower(1, Relation::weak(-10))
+                .ok()
+                .unwrap();
+            leader_state = leader_state
+                .loosen_upper(1, Relation::weak(15))
+                .ok()
+                .unwrap();
+            assert_eq!(
+                "-x ≤ -10 ∧ x ≤ 15",
+                leader_state.zone().fmt_conjunctions(&vec!["x"])
+            );
+            let state = HyperState::new(vec![leader_state, follower_state]);
+            let state = leader_follower.delay(state.clone()).ok().unwrap();
+            let (leader_state, follower_state) = (&state[0], &state[1]);
+            assert_eq!(
+                "-x ≤ -10 ∧ x ≤ 20",
+                leader_state.zone().fmt_conjunctions(&vec!["x"])
+            );
+            assert_eq!(
+                "-x ≤ 0 ∧ x ≤ 5",
+                follower_state.zone().fmt_conjunctions(&vec!["x"])
+            );
+        }
+
+        {
+            let states: Vec<_> = state.clone().into_iter().collect();
+            let [mut leader_state, follower_state] = states.try_into().unwrap();
+            leader_state = leader_state
+                .tighten_lower(1, Relation::weak(-10))
+                .ok()
+                .unwrap();
+            leader_state = leader_state
+                .loosen_upper(1, Relation::strict(15))
+                .ok()
+                .unwrap();
+            assert_eq!(
+                "-x ≤ -10 ∧ x < 15",
+                leader_state.zone().fmt_conjunctions(&vec!["x"])
+            );
+            let state = HyperState::new(vec![leader_state, follower_state]);
+            let state = leader_follower.delay(state.clone()).ok().unwrap();
+            let (leader_state, follower_state) = (&state[0], &state[1]);
+            assert_eq!(
+                "-x ≤ -10 ∧ x ≤ 20",
+                leader_state.zone().fmt_conjunctions(&vec!["x"])
+            );
+            assert_eq!(
+                "-x ≤ 0 ∧ x ≤ 5",
+                follower_state.zone().fmt_conjunctions(&vec!["x"])
+            );
+        }
     }
 
     #[test]

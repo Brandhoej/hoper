@@ -1,6 +1,13 @@
-use std::{ops::Index, slice, vec::IntoIter};
+use std::{
+    ops::{Index, IndexMut},
+    slice,
+    vec::IntoIter,
+};
 
-use crate::zones::dbm::{Canonical, DBM};
+use crate::zones::{
+    constraint::{Clock, Relation},
+    dbm::{Canonical, DBM},
+};
 
 use super::{
     channel::Channel,
@@ -52,6 +59,12 @@ impl Index<usize> for HyperState {
 
     fn index(&self, index: usize) -> &Self::Output {
         &self.states[index]
+    }
+}
+
+impl IndexMut<usize> for HyperState {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.states[index]
     }
 }
 

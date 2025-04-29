@@ -67,12 +67,12 @@ impl<State: DBMState> DBM<State> {
 
     #[inline]
     pub fn tightens(&self, i: Clock, j: Clock, relation: Relation) -> bool {
-        relation.tightens(self[(i, j)], self[(j, i)])
+        relation < self[(i, j)]
     }
 
     #[inline]
     pub fn loosens(&self, i: Clock, j: Clock, relation: Relation) -> bool {
-        relation.loosens(self[(i, j)], self[(j, i)])
+        relation > self[(i, j)]
     }
 
     #[inline]
@@ -837,79 +837,84 @@ impl DBM<Canonical> {
             .collect()
     }
 
-    /// Computes the per-clock difference in upper bound of a clock between the original and extrapolated zones.
+    /// Computes the per-clock difference in upper bound of a clock between the original and delayed zones.
     ///
     /// Interpretation of the per-clock differences:
-    /// - `Relation > 0`: The extrapolated zone is more permissive for this clock; its upper bound increased.
+    /// - `Relation > 0`: The delayed zone is more permissive for this clock; its upper bound increased.
     /// - `Relation = 0`: No change in the upper bound for this clock.
-    /// - `Relation < 0`: The extrapolated zone is more restrictive for this clock; its upper bound decreased.
-    pub fn change(&self, extrapolated: &Self, clock: Clock) -> Relation {
-        extrapolated.upper(clock).difference(self.upper(clock))
+    /// - `Relation < 0`: The delayed zone is more restrictive for this clock; its upper bound decreased.
+    pub fn change(&self, delayed: &Self, clock: Clock) -> Relation {
+        /*let difference = delayed.upper(clock) + self.upper(clock).negate_limit();
+        if difference.is_infinity() {
+            return difference;
+        }
+
+        Relation::new(
+            difference.limit(),
+            delayed
+                .upper(clock)
+                .strictness()
+                .max(self.upper(clock).strictness()),
+        )*/
+        // Relations are not expressive enough to capture delays as they are unable to relax strictness.
+        todo!()
     }
 
-    /// Computes the per-clock differences in upper bounds between the original and extrapolated zones.
+    /// Computes the per-clock differences in upper bounds between the original and delayed zones.
     ///
-    /// This method calculates, for each clock, the difference between its upper bound in the extrapolated zone
+    /// This method calculates, for each clock, the difference between its upper bound in the delayed zone
     /// and its upper bound in the original zone. The result is a vector of these differences, corresponding to each clock.
     ///
     /// Interpretation of the per-clock differences:
-    /// - `Relation > 0`: The extrapolated zone is more permissive for this clock; its upper bound increased.
+    /// - `Relation > 0`: The delayed zone is more permissive for this clock; its upper bound increased.
     /// - `Relation = 0`: No change in the upper bound for this clock.
-    /// - `Relation < 0`: The extrapolated zone is more restrictive for this clock; its upper bound decreased.
-    pub fn changes(&self, extrapolated: &Self) -> Vec<Relation> {
-        if self.clocks() != extrapolated.clocks() {
+    /// - `Relation < 0`: The delayed zone is more restrictive for this clock; its upper bound decreased.
+    pub fn changes(&self, delayed: &Self) -> Vec<Relation> {
+        if self.clocks() != delayed.clocks() {
             panic!("zones must have the same number of clocks");
         }
 
         (REFERENCE..self.dimensions())
             .into_iter()
-            .map(|clock| self.change(extrapolated, clock))
+            .map(|clock| self.change(delayed, clock))
             .collect()
     }
 
-    /// Computes the minimum change in upper bounds between the original and extrapolated zones.
+    /// Computes the minimum change in upper bounds between the original and delayed zones.
     ///
-    /// This method calculates, for each clock, the difference between its upper bound in the extrapolated zone
+    /// This method calculates, for each clock, the difference between its upper bound in the delayed zone
     /// and its upper bound in the original zone. It then returns the minimum of these differences.
     ///
     /// Interpretation of the result:
-    /// - `Relation > 0`: All clocks' upper bounds increased, indicating that the extrapolated zone is more permissive.
-    /// - `Relation = 0`: At least one clock's upper bound remained unchanged, and none decreased; the extrapolated zone is equally or more permissive.
-    /// - `Relation < 0`: At least one clock's upper bound decreased, indicating that the extrapolated zone is more restrictive.
-    pub fn min_change(&self, extrapolated: &Self) -> Relation {
+    /// - `Relation > 0`: All clocks' upper bounds increased, indicating that the delayed zone is more permissive.
+    /// - `Relation = 0`: At least one clock's upper bound remained unchanged, and none decreased; the delayed zone is equally or more permissive.
+    /// - `Relation < 0`: At least one clock's upper bound decreased, indicating that the delayed zone is more restrictive.
+    pub fn min_change(&self, delayed: &Self) -> Relation {
         // Skips the REFERENCE clock.
-        self.changes(extrapolated)
-            .into_iter()
-            .skip(1)
-            .min()
-            .unwrap()
+        self.changes(delayed).into_iter().skip(1).min().unwrap()
     }
 
-    /// Computes the maximum change in upper bounds between the original and extrapolated zones.
+    /// Computes the maximum change in upper bounds between the original and delayed zones.
     ///
     /// This method calculates, for each clock, the difference between its upper bound in the
-    /// extrapolated zone and its upper bound in the original zone. It then returns the maximum of these differences.
+    /// delayed zone and its upper bound in the original zone. It then returns the maximum of these differences.
     ///
     /// Interpretation of the result:
-    /// - `Relation > 0`: At least one clock's upper bound increased, indicating that the extrapolated zone is more permissive.
-    /// - `Relation = 0`: No change in upper bounds; the extrapolated zone is equally permissive as the original.
-    /// - `Relation < 0`: All clocks' upper bounds decreased, indicating that the extrapolated zone is more restrictive.
+    /// - `Relation > 0`: At least one clock's upper bound increased, indicating that the delayed zone is more permissive.
+    /// - `Relation = 0`: No change in upper bounds; the delayed zone is equally permissive as the original.
+    /// - `Relation < 0`: All clocks' upper bounds decreased, indicating that the delayed zone is more restrictive.
     ///
-    pub fn max_change(&self, extrapolated: &Self) -> Relation {
+    pub fn max_change(&self, delayed: &Self) -> Relation {
         // Skips the REFERENCE clock.
-        self.changes(extrapolated)
-            .into_iter()
-            .skip(1)
-            .max()
-            .unwrap()
+        self.changes(delayed).into_iter().skip(1).max().unwrap()
     }
 
-    // Clamps the change made in the extrapolated zone such that no change exceeds the min and max if specified.
-    pub fn clamp_delay(&self, extrapolated: Self, max: Relation) -> Result<Self, DBM<Unsafe>> {
+    // Clamps the change made in the delayed zone such that no change exceeds the min and max if specified.
+    pub fn clamp_delay(&self, delayed: Self, max: Relation) -> Result<Self, DBM<Unsafe>> {
         // FIXME: Only when relations have been tightend should it be closed.
 
-        let changes = self.changes(&extrapolated);
-        let mut dirty = extrapolated.dirty();
+        let changes = self.changes(&delayed);
+        let mut dirty = delayed.dirty();
         for (clock, change) in changes.into_iter().enumerate() {
             let clock = clock as Clock;
             if clock == REFERENCE {
@@ -917,23 +922,23 @@ impl DBM<Canonical> {
             }
 
             if change > max {
-                dirty.tighten_upper(clock, dirty.lower(clock) + max);
+                dirty.set_upper(clock, self.upper(clock) + max);
             }
         }
 
         dirty.clean()
     }
 
-    /// Computes the minimum performed delay (Permissive change) between the original and extrapolated zones.
+    /// Computes the minimum performed delay (Permissive change) between the original and delayed zones.
     ///
-    /// This method calculates, for each clock, the difference between its upper bound in the extrapolated zone
+    /// This method calculates, for each clock, the difference between its upper bound in the delayed zone
     /// and its upper bound in the original zone. It then returns the minimum positive of these differences.
     ///
     /// Interpretation of the result:
     /// - `None`: No delay (Permissive change) has happened.
     /// - `Some(delay)`: The smallest delay (Permissive change).
-    pub fn min_delay(&self, extrapolated: &Self) -> Option<Relation> {
-        self.changes(extrapolated)
+    pub fn min_delay(&self, delayed: &Self) -> Option<Relation> {
+        self.changes(delayed)
             .into_iter()
             .skip(1)
             .filter_map(|change| {
@@ -945,16 +950,16 @@ impl DBM<Canonical> {
             .min()
     }
 
-    /// Computes the maximum performed delay (Permissive change) between the original and extrapolated zones.
+    /// Computes the maximum performed delay (Permissive change) between the original and delayed zones.
     ///
-    /// This method calculates, for each clock, the difference between its upper bound in the extrapolated zone
+    /// This method calculates, for each clock, the difference between its upper bound in the delayed zone
     /// and its upper bound in the original zone. It then returns the maximum positive of these differences.
     ///
     /// Interpretation of the result:
     /// - `None`: No delay (Permissive change) has happened.
     /// - `Some(delay)`: The greatest delay (Permissive change).
-    pub fn max_delay(&self, extrapolated: &Self) -> Option<Relation> {
-        self.changes(extrapolated)
+    pub fn max_delay(&self, delayed: &Self) -> Option<Relation> {
+        self.changes(delayed)
             .into_iter()
             .skip(1)
             .filter_map(|change| {
@@ -1282,13 +1287,13 @@ mod tests {
     #[test]
     fn dbm1_min_max_delay() {
         let dbm = dbm1();
-        let extrapolated = dbm.clone().delay(Relation::weak(1)).ok().unwrap();
+        let delayed = dbm.clone().delay(Relation::weak(1)).ok().unwrap();
         assert_eq!(
             "-x < -1 ∧ x < 4 ∧ x - y < 1 ∧ -y < -2 ∧ y < 4 ∧ y - x < 2",
-            extrapolated.fmt_conjunctions(&vec!["x", "y"])
+            delayed.fmt_conjunctions(&vec!["x", "y"])
         );
-        assert_eq!("(1, <)", dbm.min_change(&extrapolated).to_string());
-        assert_eq!("(1, <)", dbm.max_change(&extrapolated).to_string());
+        assert_eq!("(1, <)", dbm.min_change(&delayed).to_string());
+        assert_eq!("(1, <)", dbm.max_change(&delayed).to_string());
     }
 
     #[test]
@@ -1305,13 +1310,13 @@ mod tests {
     #[test]
     fn dbm4_min_max_delay() {
         let dbm = dbm4();
-        let extrapolated = dbm.clone().delay(Relation::weak(2)).ok().unwrap();
+        let delayed = dbm.clone().delay(Relation::weak(2)).ok().unwrap();
         assert_eq!(
             "-x ≤ 0 ∧ x ≤ 3 ∧ x - y ≤ 1 ∧ -y ≤ 0 ∧ y ≤ 4 ∧ y - x ≤ 2",
-            extrapolated.fmt_conjunctions(&vec!["x", "y"])
+            delayed.fmt_conjunctions(&vec!["x", "y"])
         );
-        assert_eq!("(2, ≤)", dbm.min_change(&extrapolated).to_string());
-        assert_eq!("(2, ≤)", dbm.max_change(&extrapolated).to_string());
+        assert_eq!("(2, ≤)", dbm.min_change(&delayed).to_string());
+        assert_eq!("(2, ≤)", dbm.max_change(&delayed).to_string());
     }
 
     #[test]

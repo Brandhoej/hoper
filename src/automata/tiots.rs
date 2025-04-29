@@ -99,7 +99,7 @@ impl State {
     }
 
     pub fn set_limit(mut self, clock: Clock, limit: Limit) -> Result<Self, ()> {
-        self = match self.tighten_lower(clock, Relation::weak(limit)) {
+        self = match self.tighten_lower(clock, Relation::weak(-limit)) {
             Ok(state) => state,
             Err(_) => return Err(()),
         };
@@ -165,11 +165,6 @@ impl State {
     // FIXME: I think this should assign a readonly variable in the environment designated for the location.
     pub fn set_location(&mut self, location: LocationTree) {
         self.location = location
-    }
-
-    // FIXME: I think this should assign a clock variable and should be a part of the generic interface like `set_location`.
-    pub const fn mut_zone(&mut self) -> &mut DBM<Canonical> {
-        &mut self.zone
     }
 }
 
