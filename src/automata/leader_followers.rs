@@ -1,8 +1,10 @@
+use itertools::Itertools;
+
 use crate::zones::constraint::{Relation, ZERO};
 
 use super::{
     channel::Channel,
-    htiots::{HyperState, HyperTransition, HTIOTS},
+    htiots::{HyperState, HyperTransition, SystemOfSystems, HTIOTS},
     tioa::Traversal,
     tiots::{State, Transition, TIOTS},
 };
@@ -12,7 +14,7 @@ use super::{
 /// and if they are unable to delay that amount then there exists no delay.
 pub struct LeaderFollowers {
     leader: usize,
-    systems: Vec<Box<dyn TIOTS>>,
+    systems: SystemOfSystems,
 }
 
 impl LeaderFollowers {
@@ -21,7 +23,10 @@ impl LeaderFollowers {
             panic!("the leader must be one of the systems")
         }
 
-        Self { systems, leader }
+        Self {
+            systems: SystemOfSystems::new(systems),
+            leader,
+        }
     }
 
     pub fn leader(&self) -> &dyn TIOTS {
@@ -43,12 +48,7 @@ impl LeaderFollowers {
 
 impl HTIOTS for LeaderFollowers {
     fn initial_state(&self) -> HyperState {
-        let states = self
-            .systems
-            .iter()
-            .map(|system| system.initial_state())
-            .collect();
-        HyperState::new(states)
+        self.systems.initial_state()
     }
 
     fn delay(&self, state: HyperState) -> Result<HyperState, ()> {
@@ -113,34 +113,24 @@ impl HTIOTS for LeaderFollowers {
         Ok(HyperState::new(synchronisations))
     }
 
-    fn discrete(&self, state: HyperState, traversals: Vec<Traversal>) -> Result<HyperState, ()> {
-        let mut states = self
-            .systems
-            .iter()
-            .enumerate()
-            .map(|(idx, system)| system.discrete(state[idx].clone(), traversals[idx].clone()));
-        if states.any(|state| state.is_err()) {
-            return Err(());
-        }
-        Ok(HyperState::new(
-            states.map(|state| state.unwrap()).collect(),
-        ))
+    fn discrete(
+        &self,
+        state: HyperState,
+        traversals: Vec<Option<Traversal>>,
+    ) -> Result<HyperState, ()> {
+        self.systems.discrete(state, traversals)
+    }
+
+    fn is_valid(&self, state: &HyperState) -> Result<bool, ()> {
+        self.systems.is_valid(state)
     }
 
     fn is_enabled(&self, transition: HyperTransition) -> Result<bool, ()> {
-        let transitions: Vec<Transition> = transition.into();
-        for (system, transition) in self.systems.iter().zip(transitions.iter()) {
-            match system.is_enabled(transition) {
-                Ok(true) => continue,
-                Ok(false) => return Ok(false),
-                Err(_) => return Err(()),
-            }
-        }
-        Ok(true)
+        self.systems.is_enabled(transition)
     }
 
-    fn enabled(&self, state: &HyperState, channels: Vec<Channel>) -> Vec<HyperTransition> {
-        todo!()
+    fn enabled(&self, state: &HyperState, channels: Vec<Option<Channel>>) -> Vec<HyperTransition> {
+        self.systems.enabled(state, channels)
     }
 }
 

@@ -2,29 +2,26 @@ use crate::zones::constraint::Relation;
 
 use super::{
     channel::Channel,
-    htiots::{HyperState, HyperTransition, HTIOTS},
+    htiots::{HyperState, HyperTransition, SystemOfSystems, HTIOTS},
     tioa::Traversal,
-    tiots::{State, Transition, TIOTS},
+    tiots::{State, TIOTS},
 };
 
 pub struct SynchronisedSystems {
-    systems: Vec<Box<dyn TIOTS>>,
+    systems: SystemOfSystems,
 }
 
 impl SynchronisedSystems {
-    pub fn new(systems: Vec<Box<dyn TIOTS>>) -> Self {
-        Self { systems }
+    pub const fn new(systems: Vec<Box<dyn TIOTS>>) -> Self {
+        Self {
+            systems: SystemOfSystems::new(systems),
+        }
     }
 }
 
 impl HTIOTS for SynchronisedSystems {
     fn initial_state(&self) -> HyperState {
-        let states = self
-            .systems
-            .iter()
-            .map(|system| system.initial_state())
-            .collect();
-        HyperState::new(states)
+        self.systems.initial_state()
     }
 
     /// Computes the possible synchronised delay across multiple systems.
@@ -90,34 +87,23 @@ impl HTIOTS for SynchronisedSystems {
         Ok(HyperState::new(synchronisations))
     }
 
-    /// Performs the state changes from the traversal and updates the states accordingly.
-    fn discrete(&self, state: HyperState, traversals: Vec<Traversal>) -> Result<HyperState, ()> {
-        let mut states = self
-            .systems
-            .iter()
-            .enumerate()
-            .map(|(idx, system)| system.discrete(state[idx].clone(), traversals[idx].clone()));
-        if states.any(|state| state.is_err()) {
-            return Err(());
-        }
-        Ok(HyperState::new(
-            states.map(|state| state.unwrap()).collect(),
-        ))
+    fn discrete(
+        &self,
+        state: HyperState,
+        traversals: Vec<Option<Traversal>>,
+    ) -> Result<HyperState, ()> {
+        self.systems.discrete(state, traversals)
     }
 
-    fn is_enabled(&self, transition: HyperTransition) -> Result<bool, ()> {
-        let transitions: Vec<Transition> = transition.into();
-        for (system, transition) in self.systems.iter().zip(transitions.iter()) {
-            match system.is_enabled(transition) {
-                Ok(true) => continue,
-                Ok(false) => return Ok(false),
-                Err(_) => return Err(()),
-            }
-        }
-        Ok(true)
+    fn is_valid(&self, state: &HyperState) -> Result<bool, ()> {
+        self.systems.is_valid(state)
     }
 
-    fn enabled(&self, state: &HyperState, channels: Vec<Channel>) -> Vec<HyperTransition> {
-        todo!()
+    fn is_enabled(&self, hyper_transition: HyperTransition) -> Result<bool, ()> {
+        self.systems.is_enabled(hyper_transition)
+    }
+
+    fn enabled(&self, state: &HyperState, channels: Vec<Option<Channel>>) -> Vec<HyperTransition> {
+        self.systems.enabled(state, channels)
     }
 }

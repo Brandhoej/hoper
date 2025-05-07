@@ -21,7 +21,6 @@ pub mod literal;
 pub mod location;
 pub mod partitioned_symbol_table;
 pub mod refinement;
-pub mod refinement_relation;
 pub mod specification;
 pub mod state_set;
 pub mod statements;

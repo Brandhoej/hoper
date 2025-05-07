@@ -203,6 +203,14 @@ impl Transition {
         Self::Discrete { state, traversal }
     }
 
+    /// Returns the `state` of the transition.
+    pub const fn state(&self) -> &State {
+        match &self {
+            Transition::Delay { state } => state,
+            Transition::Discrete { state, .. } => state,
+        }
+    }
+
     /// Returns `true` if the transition is a delay transition.
     pub const fn is_delay(&self) -> bool {
         matches!(self, Self::Delay { .. })
@@ -269,6 +277,12 @@ where
     /// - `Ok(State)`: The new state after applying the discrete transition.
     /// - `Err(())`: If the discrete transition is not possible due to guard or invariant violations, or transition failure.
     fn discrete(&self, state: State, traversal: Traversal) -> Result<State, ()>;
+
+    /// Checks if the state is valid in the system.
+    ///
+    /// Ie. Verifies whether the current state satisfies the invariant of the current location.
+    /// If the location is not in the system then an error is returned.
+    fn is_valid(&self, state: &State) -> Result<bool, ()>;
 
     /// Checks whether the given transition is enabled from the current state.
     ///
@@ -344,9 +358,23 @@ impl<T: ?Sized + TIOA> TIOTS for T {
         Ok(state)
     }
 
+    fn is_valid(&self, state: &State) -> Result<bool, ()> {
+        let location = match self.location(state.location()) {
+            Ok(location) => location,
+            Err(_) => return Err(()),
+        };
+
+        let mut interpreter = Interpreter::new();
+
+        match interpreter.satisfies(state, &location.invariant()) {
+            Ok(satisfied) => Ok(satisfied),
+            Err(_) => return Err(()),
+        }
+    }
+
     /// Checks whether a given `Transition` is currently enabled from the starting `State`.
     ///
-    /// - For a `Delay` transition:
+    /// - For a `Delay` transition: It checks if the state is valid.
     ///   - Verifies whether the current state satisfies the invariant of the current location.
     ///
     /// - For a `Discrete` transition:
@@ -362,52 +390,47 @@ impl<T: ?Sized + TIOA> TIOTS for T {
     /// - `Ok(false)`: If the transition is disabled.
     /// - `Err(())`: If an error occurs during guard evaluation, statement execution, or invariant checking.
     fn is_enabled(&self, transition: &Transition) -> Result<bool, ()> {
-        match transition {
-            Transition::Delay { state } => {
-                let location = match self.location(state.location()) {
-                    Ok(location) => location,
-                    Err(_) => return Err(()),
-                };
-
-                let mut interpreter = Interpreter::new();
-
-                // Checks the state satisfies the location's invariant.
-                match interpreter.satisfies(state, &location.invariant()) {
-                    Ok(satisfied) => Ok(satisfied),
-                    Err(_) => return Err(()),
-                }
-            }
-            Transition::Discrete {
-                ref state,
-                traversal,
-            } => {
-                let mut interpreter = Interpreter::new();
-
-                let edge = match self.edge(traversal.edge()) {
-                    Ok(edge) => edge,
-                    Err(_) => return Err(()),
-                };
-
-                // Checks if the edge's guard is enabled.
-                let satisfied = match interpreter.satisfies(&state, edge.guard()) {
-                    Ok(satisfied) => satisfied,
-                    Err(_) => return Err(()),
-                };
-
-                if !satisfied {
-                    return Ok(false);
-                }
-
-                // Performs the update on the state.
-                let state = match interpreter.statement(state.clone(), &edge.update()) {
-                    Ok(state) => state,
-                    Err(_) => return Err(()),
-                };
-
-                // Checks if the updated state satisfies the location's invariant.
-                self.is_enabled(&Transition::delay(state))
-            }
+        // All transitions must start in a valid state.
+        match self.is_valid(transition.state()) {
+            Ok(false) => return Ok(false),
+            Err(_) => return Err(()),
+            _ => {}
         }
+
+        // Only the discrete transition traverse a potentially guarded edge to a location.
+        if let Transition::Discrete {
+            ref state,
+            traversal,
+        } = transition
+        {
+            let mut interpreter = Interpreter::new();
+
+            let edge = match self.edge(traversal.edge()) {
+                Ok(edge) => edge,
+                Err(_) => return Err(()),
+            };
+
+            // Checks if the edge's guard is enabled.
+            let satisfied = match interpreter.satisfies(&state, edge.guard()) {
+                Ok(satisfied) => satisfied,
+                Err(_) => return Err(()),
+            };
+
+            if !satisfied {
+                return Ok(false);
+            }
+
+            // Performs the update on the state.
+            let state = match interpreter.statement(state.clone(), &edge.update()) {
+                Ok(state) => state,
+                Err(_) => return Err(()),
+            };
+
+            // Checks if the updated state satisfies the location's invariant.
+            return self.is_enabled(&Transition::delay(state));
+        }
+
+        Ok(true)
     }
 
     /// Computes all enabled discrete transitions from a given `State` on a specific `Channel`.
