@@ -216,12 +216,12 @@ mod tests {
         assert!(exact == exact);
         assert!(relaxed == relaxed);
         assert!(tightened == tightened);
+        assert!(tightened < exact);
+        assert!(tightened < relaxed);
         assert!(exact < relaxed);
         assert!(exact > tightened);
         assert!(relaxed > exact);
-        assert!(tightened < exact);
         assert!(relaxed > tightened);
-        assert!(tightened < relaxed);
     }
 
     #[test]
