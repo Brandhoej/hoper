@@ -197,7 +197,7 @@ impl SystemOfSystems {
         state: HyperState,
         traversals: Vec<Option<Traversal>>,
     ) -> Result<HyperState, ()> {
-        let mut states = self
+        let states = self
             .systems
             .iter()
             .enumerate()
@@ -206,11 +206,11 @@ impl SystemOfSystems {
                 Some(traversal) => system.discrete(state[idx].clone(), traversal.clone()),
                 None => Ok(state[idx].clone()),
             });
-        if states.any(|state| state.is_err()) {
+        if states.clone().any(|state| state.is_err()) {
             return Err(());
         }
         Ok(HyperState::new(
-            states.map(|state| state.unwrap()).collect(),
+            states.map(|state| state.ok().unwrap()).collect(),
         ))
     }
 
@@ -250,6 +250,8 @@ impl SystemOfSystems {
         state: &HyperState,
         channels: Vec<Option<Channel>>,
     ) -> Vec<HyperTransition> {
+        // FIXME: We have to consider the minimum and maximum delay required for the edge to be enabled. Only when the product edge delay interval interesects is the intersection state considered and only then we the hypertransition exists.
+
         let mut hyper_transitions = Vec::new();
 
         for transitions in self

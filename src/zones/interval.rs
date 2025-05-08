@@ -1,6 +1,9 @@
 use std::fmt::Display;
 
-use super::constraint::{Limit, Relation, INFINITY};
+use super::{
+    constraint::{Limit, Relation},
+    delay::Delay,
+};
 
 #[derive(PartialEq, Eq, Debug, Clone, Copy, Hash)]
 pub struct Interval {
@@ -36,22 +39,15 @@ impl Interval {
         self.upper
     }
 
-    pub fn included(&self) -> Relation {
-        if self.upper.is_infinity() {
-            return INFINITY;
-        }
-
-        Relation::new(
-            self.upper.limit() - self.lower.limit(),
-            self.upper.strictness().min(self.lower.strictness()),
-        )
+    pub fn delay(&self) -> Delay {
+        Delay::between(self.lower, self.upper).ok().unwrap()
     }
 
-    pub fn between(&self, other: &Self) -> Option<Relation> {
+    pub fn between(&self, other: &Self) -> Option<Delay> {
         if self.upper < other.lower {
-            Some(other.lower - self.upper)
+            Some(Delay::between(self.upper, other.lower).ok().unwrap())
         } else if other.upper < self.lower {
-            Some(self.lower - other.upper)
+            Some(Delay::between(other.upper, self.lower).ok().unwrap())
         } else {
             None
         }
@@ -131,31 +127,25 @@ impl Display for Interval {
 
 #[cfg(test)]
 mod tests {
-    use crate::zones::{
-        constraint::{Relation, Strictness},
-        intervals::Interval,
-    };
+    use crate::zones::{constraint::Relation, interval::Interval};
 
     #[test]
     fn included() {
-        assert_eq!("(10, ≤)", Interval::closed(12, 22).included().to_string());
-        assert_eq!("(0, ≤)", Interval::closed(12, 12).included().to_string());
-        assert_eq!("(10, ≤)", Interval::closed(-22, -12).included().to_string());
-        assert_eq!("(0, ≤)", Interval::closed(-12, -12).included().to_string());
-        assert_eq!("(34, ≤)", Interval::closed(-22, 12).included().to_string());
-        assert_eq!("(24, ≤)", Interval::closed(-12, 12).included().to_string());
+        assert_eq!("10", Interval::closed(12, 22).delay().to_string());
+        assert_eq!("0", Interval::closed(12, 12).delay().to_string());
+        assert_eq!("10", Interval::closed(-22, -12).delay().to_string());
+        assert_eq!("0", Interval::closed(-12, -12).delay().to_string());
+        assert_eq!("34", Interval::closed(-22, 12).delay().to_string());
+        assert_eq!("24", Interval::closed(-12, 12).delay().to_string());
 
-        assert_eq!("(1, <)", Interval::opened(0, 1).included().to_string());
-        assert_eq!("(2, <)", Interval::opened(3, 5).included().to_string());
+        assert_eq!("1", Interval::opened(0, 1).delay().to_string());
+        assert_eq!("2", Interval::opened(3, 5).delay().to_string());
 
         assert_eq!(
-            "(1, <)",
-            Interval::new(
-                Relation::new(3, Strictness::Strict),
-                Relation::new(4, Strictness::Weak)
-            )
-            .included()
-            .to_string()
+            "1↑",
+            Interval::new(Relation::strict(3), Relation::weak(4))
+                .delay()
+                .to_string()
         );
     }
 
@@ -191,28 +181,28 @@ mod tests {
             .is_none());
 
         assert_eq!(
-            "(1, ≤)",
+            "1",
             Interval::closed(0, 0)
                 .between(&Interval::closed(1, 1))
                 .unwrap()
                 .to_string()
         );
         assert_eq!(
-            "(1, <)",
+            "1↓",
             Interval::closed(0, 0)
                 .between(&Interval::opened(1, 2))
                 .unwrap()
                 .to_string()
         );
         assert_eq!(
-            "(1, <)",
+            "1↓",
             Interval::opened(1, 2)
                 .between(&Interval::closed(0, 0))
                 .unwrap()
                 .to_string()
         );
         assert_eq!(
-            "(1, <)",
+            "1",
             Interval::opened(1, 2)
                 .between(&Interval::opened(3, 4))
                 .unwrap()

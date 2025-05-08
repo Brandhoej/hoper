@@ -2,6 +2,7 @@ use crate::zones::{
     bounds::Bounds,
     constraint::{Clock, Limit, Relation, REFERENCE},
     dbm::{Canonical, DBM},
+    delay::Delay,
 };
 
 use super::{
@@ -62,7 +63,7 @@ impl State {
     /// time delay across multiple systems essentially acting as a synchronisation of time.
     ///
     /// Q: Is this actually a new form of extrapolation?
-    pub fn synchronise(mut self, before: &Self, max_delay: Relation) -> Result<Self, ()> {
+    pub fn synchronise(mut self, before: &Self, max_delay: Delay) -> Result<Self, ()> {
         match before.zone().clamp_delay(self.zone, max_delay) {
             Ok(zone) => {
                 self.zone = zone;

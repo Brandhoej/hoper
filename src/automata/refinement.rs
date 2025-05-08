@@ -128,16 +128,15 @@ impl Refinement {
         let mut visited: HyperStateSet = HyperStateSet::new();
 
         // (qᔆ₀, qᵀ₀) ∈ R
-        worklist.push_back(self.initial_state());
+        match self.delay(self.initial_state()) {
+            Ok(state) => {
+                visited.insert(&state);
+                worklist.push_back(state);
+            }
+            Err(_) => return Err(()),
+        }
 
-        while let Some(mut state) = worklist.pop_front() {
-            // Rule 5 (Delay): If the implementation can perform the delay so should the specification.
-            // Whenever s -d->ᔆ s' for some s' ∈ Qᔆ and d ∈ R≥0, then t -d->ᵀ t' and (s', t') ∈ R for some t' ∈ Qᵀ.
-            state = match self.delay(state) {
-                Ok(state) => state,
-                Err(_) => todo!(),
-            };
-
+        while let Some(state) = worklist.pop_front() {
             let mut channels: Vec<Vec<Option<Channel>>> = Vec::new();
 
             // Rule 1 (Common inputs): Both the specification and implementaion can react on the input.
@@ -170,7 +169,14 @@ impl Refinement {
 
             for channels in channels.into_iter() {
                 for transition in self.enabled(&state, channels) {
-                    let state = match self.leader_follower.transition(transition) {
+                    let mut state = match self.leader_follower.transition(transition) {
+                        Ok(state) => state,
+                        Err(_) => return Err(()),
+                    };
+
+                    // Rule 5 (Delay): If the implementation can perform the delay so should the specification.
+                    // Whenever s -d->ᔆ s' for some s' ∈ Qᔆ and d ∈ R≥0, then t -d->ᵀ t' and (s', t') ∈ R for some t' ∈ Qᵀ.
+                    state = match self.delay(state) {
                         Ok(state) => state,
                         Err(_) => return Err(()),
                     };
@@ -183,7 +189,7 @@ impl Refinement {
             }
         }
 
-        todo!()
+        return Ok(());
     }
 }
 

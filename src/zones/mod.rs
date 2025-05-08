@@ -3,4 +3,5 @@ pub mod constraint;
 pub mod dbm;
 pub mod delay;
 pub mod federation;
-pub mod intervals;
+pub mod interval;
+pub mod window;

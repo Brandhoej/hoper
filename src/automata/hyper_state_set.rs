@@ -56,4 +56,9 @@ impl HyperStateSet {
             false
         }
     }
+
+    /// Returns the set of hyper states which represents the yet uncovered part of the state.
+    pub fn uncovered(&self, state: &HyperState) -> Vec<HyperState> {
+        todo!()
+    }
 }

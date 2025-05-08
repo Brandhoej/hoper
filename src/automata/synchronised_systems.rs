@@ -1,4 +1,4 @@
-use crate::zones::constraint::Relation;
+use crate::zones::{constraint::Relation, delay::Delay};
 
 use super::{
     channel::Channel,
@@ -47,7 +47,7 @@ impl HTIOTS for SynchronisedSystems {
         }
 
         let mut extrapolations: Vec<State> = Vec::with_capacity(states.len());
-        let mut global_minimum_delay: Option<Relation> = None;
+        let mut global_minimum_delay: Option<Delay> = None;
         for (system, state) in states.iter().enumerate() {
             // Step 1: Compute all the extrapolations.
             let extrapolation = match self.systems[system].delay(state.clone()) {

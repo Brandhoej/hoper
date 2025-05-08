@@ -6,7 +6,9 @@ use bitset::BitSet;
 use super::{
     bounds::Bounds,
     constraint::{Clock, Limit, Relation, Strictness, INFINITY, REFERENCE, ZERO},
-    intervals::Interval,
+    delay::Delay,
+    interval::Interval,
+    window::{self, Window},
 };
 
 pub trait DBMState: Sized {}
@@ -823,187 +825,155 @@ impl DBM<Canonical> {
         }
     }
 
-    // Computes the delay interval of a clock.
+    /// Returns the inclusive interval of feasible delay values for a single clock within the zone.
     pub fn clock_interval(&self, clock: Clock) -> Interval {
         let lower = self.lower(clock).negate_limit();
         let upper = self.upper(clock);
         Interval::new(lower, upper)
     }
 
-    // Computes the delay interval of all clocks
+    /// Returns per-clock delay intervals for all clocks in the zone.
     pub fn clock_intervals(&self) -> Vec<Interval> {
         (REFERENCE + 1..self.dimensions())
             .map(|clock| self.clock_interval(clock))
             .collect()
     }
 
-    /// Computes the per-clock difference in upper bound of a clock between the original and delayed zones.
-    ///
-    /// Interpretation of the per-clock differences:
-    /// - `Relation > 0`: The delayed zone is more permissive for this clock; its upper bound increased.
-    /// - `Relation = 0`: No change in the upper bound for this clock.
-    /// - `Relation < 0`: The delayed zone is more restrictive for this clock; its upper bound decreased.
-    pub fn change(&self, delayed: &Self, clock: Clock) -> Relation {
-        /*let difference = delayed.upper(clock) + self.upper(clock).negate_limit();
-        if difference.is_infinity() {
-            return difference;
-        }
-
-        Relation::new(
-            difference.limit(),
-            delayed
-                .upper(clock)
-                .strictness()
-                .max(self.upper(clock).strictness()),
-        )*/
-        // Relations are not expressive enough to capture delays as they are unable to relax strictness.
-        todo!()
-    }
-
-    /// Computes the per-clock differences in upper bounds between the original and delayed zones.
-    ///
-    /// This method calculates, for each clock, the difference between its upper bound in the delayed zone
-    /// and its upper bound in the original zone. The result is a vector of these differences, corresponding to each clock.
-    ///
-    /// Interpretation of the per-clock differences:
-    /// - `Relation > 0`: The delayed zone is more permissive for this clock; its upper bound increased.
-    /// - `Relation = 0`: No change in the upper bound for this clock.
-    /// - `Relation < 0`: The delayed zone is more restrictive for this clock; its upper bound decreased.
-    pub fn changes(&self, delayed: &Self) -> Vec<Relation> {
-        if self.clocks() != delayed.clocks() {
-            panic!("zones must have the same number of clocks");
-        }
-
-        (REFERENCE..self.dimensions())
-            .into_iter()
-            .map(|clock| self.change(delayed, clock))
+    /// Computes per-clock delay windows in which both `self` and `other` zones remain valid.
+    pub fn delay_enabled_windows(&self, other: &Self) -> Vec<Window> {
+        (REFERENCE + 1..self.dimensions())
+            .map(|clock| {
+                let lower = Delay::between(
+                    self.lower(clock).negate_limit(),
+                    other.lower(clock).negate_limit(),
+                )
+                .unwrap();
+                let upper =
+                    Delay::between(self.lower(clock).negate_limit(), other.upper(clock)).unwrap();
+                Window::new(lower, upper)
+            })
             .collect()
     }
 
-    /// Computes the minimum change in upper bounds between the original and delayed zones.
-    ///
-    /// This method calculates, for each clock, the difference between its upper bound in the delayed zone
-    /// and its upper bound in the original zone. It then returns the minimum of these differences.
-    ///
-    /// Interpretation of the result:
-    /// - `Relation > 0`: All clocks' upper bounds increased, indicating that the delayed zone is more permissive.
-    /// - `Relation = 0`: At least one clock's upper bound remained unchanged, and none decreased; the delayed zone is equally or more permissive.
-    /// - `Relation < 0`: At least one clock's upper bound decreased, indicating that the delayed zone is more restrictive.
-    pub fn min_change(&self, delayed: &Self) -> Relation {
-        // Skips the REFERENCE clock.
-        self.changes(delayed).into_iter().skip(1).min().unwrap()
-    }
-
-    /// Computes the maximum change in upper bounds between the original and delayed zones.
-    ///
-    /// This method calculates, for each clock, the difference between its upper bound in the
-    /// delayed zone and its upper bound in the original zone. It then returns the maximum of these differences.
-    ///
-    /// Interpretation of the result:
-    /// - `Relation > 0`: At least one clock's upper bound increased, indicating that the delayed zone is more permissive.
-    /// - `Relation = 0`: No change in upper bounds; the delayed zone is equally permissive as the original.
-    /// - `Relation < 0`: All clocks' upper bounds decreased, indicating that the delayed zone is more restrictive.
-    ///
-    pub fn max_change(&self, delayed: &Self) -> Relation {
-        // Skips the REFERENCE clock.
-        self.changes(delayed).into_iter().skip(1).max().unwrap()
+    /// Computes the global delay window across all clocks for which both `self` and `other` remain valid.
+    pub fn delay_enabled_window(&self, other: &Self) -> Option<Window> {
+        Window::intersections(self.delay_enabled_windows(other))
     }
 
     // Clamps the change made in the delayed zone such that no change exceeds the min and max if specified.
-    pub fn clamp_delay(&self, delayed: Self, max: Relation) -> Result<Self, DBM<Unsafe>> {
-        // FIXME: Only when relations have been tightend should it be closed.
-
-        let changes = self.changes(&delayed);
+    pub fn clamp_delay(&self, delayed: Self, max: Delay) -> Result<Self, DBM<Unsafe>> {
+        // Q: Can we still be correct but only restrict the constraining clocks?
+        // Q: Does this have to follow the zones diagonal (Ie. symmetric change across all clocks)? If so then this is likely incorrect.
+        let delays = self.delays(&delayed);
         let mut dirty = delayed.dirty();
-        for (clock, change) in changes.into_iter().enumerate() {
-            let clock = clock as Clock;
-            if clock == REFERENCE {
-                continue;
-            }
+        for (clock, delay) in delays.into_iter().enumerate() {
+            if let Ok(delay) = delay {
+                let clock = clock as Clock;
+                if clock == REFERENCE {
+                    continue;
+                }
 
-            if change > max {
-                dirty.set_upper(clock, self.upper(clock) + max);
+                if delay > max {
+                    dirty.set_upper(clock, self.upper(clock) + max);
+                }
             }
         }
 
         dirty.clean()
     }
 
-    /// Computes the minimum performed delay (Permissive change) between the original and delayed zones.
+    pub fn clamp_window(&self, other: Self, window: Window) -> Result<Self, DBM<Unsafe>> {
+        let mut dirty = other.dirty();
+
+        for clock in REFERENCE + 1..self.dimensions() {
+            let lower = (self.lower(clock).negate_limit() + window.lower()).negate_limit();
+            let upper = self.lower(clock).negate_limit() + window.upper();
+            dirty.tighten_lower(clock, lower);
+            dirty.tighten_upper(clock, upper);
+        }
+
+        dirty.clean()
+    }
+
+    /// Computes the delay differences between each corresponding clock in `self` and `delayed`,
+    /// including the reference clock.
+    pub fn delays(&self, delayed: &Self) -> Vec<Result<Delay, ()>> {
+        if self.clocks() != delayed.clocks() {
+            panic!("zones must have the same number of clocks");
+        }
+
+        (REFERENCE..self.dimensions())
+            .into_iter()
+            .map(|clock| Delay::between(self.upper(clock), delayed.upper(clock)))
+            .collect()
+    }
+
+    /// Computes the amount each clock's lower bound has been shifted between `self` and `delayed`.
+    ///
+    /// For each clock (including the reference clock), this returns the delay between the lower bound
+    /// in `delayed` and the corresponding lower bound in `self`.
+    ///
+    /// A positive delay indicates that the clock was delayed (i.e., the bound moved later),
+    /// while a negative delay indicates it advanced (i.e., the bound moved earlier).
+    pub fn shifts(&self, delayed: &Self) -> Vec<Result<Delay, ()>> {
+        if self.clocks() != delayed.clocks() {
+            panic!("zones must have the same number of clocks");
+        }
+
+        (REFERENCE..self.dimensions())
+            .into_iter()
+            .map(|clock| Delay::between(delayed.lower(clock), self.lower(clock)))
+            .collect()
+    }
+
+    /// Returns the maximum internal delay for the zone.
+    ///
+    /// This is the smallest difference between the lower and upper bounds across all clocks,
+    /// representing the maximum amount of delay that can be applied internally.
+    pub fn duration(&self) -> Delay {
+        (REFERENCE..self.dimensions())
+            .into_iter()
+            .map(|clock| Delay::between(self.lower(clock), self.upper(clock)).unwrap())
+            .min()
+            .unwrap()
+    }
+
+    /// Computes the minimum performed delay between the original and delayed zones.
     ///
     /// This method calculates, for each clock, the difference between its upper bound in the delayed zone
     /// and its upper bound in the original zone. It then returns the minimum positive of these differences.
     ///
     /// Interpretation of the result:
-    /// - `None`: No delay (Permissive change) has happened.
+    /// - `None`: No delay has happened.
     /// - `Some(delay)`: The smallest delay (Permissive change).
-    pub fn min_delay(&self, delayed: &Self) -> Option<Relation> {
-        self.changes(delayed)
+    pub fn min_delay(&self, delayed: &Self) -> Option<Delay> {
+        self.delays(delayed)
             .into_iter()
             .skip(1)
-            .filter_map(|change| {
-                if change < ZERO {
-                    return None;
-                }
-                return Some(change);
+            .filter_map(|delay| match delay {
+                Ok(delay) => Some(delay),
+                Err(_) => None,
             })
             .min()
     }
 
-    /// Computes the maximum performed delay (Permissive change) between the original and delayed zones.
+    /// Computes the maximum performed delay between the original and delayed zones.
     ///
     /// This method calculates, for each clock, the difference between its upper bound in the delayed zone
     /// and its upper bound in the original zone. It then returns the maximum positive of these differences.
     ///
     /// Interpretation of the result:
-    /// - `None`: No delay (Permissive change) has happened.
+    /// - `None`: No delay has happened.
     /// - `Some(delay)`: The greatest delay (Permissive change).
-    pub fn max_delay(&self, delayed: &Self) -> Option<Relation> {
-        self.changes(delayed)
+    pub fn max_delay(&self, delayed: &Self) -> Option<Delay> {
+        self.delays(delayed)
             .into_iter()
             .skip(1)
-            .filter_map(|change| {
-                if change < ZERO {
-                    return None;
-                }
-                return Some(change);
+            .filter_map(|delay| match delay {
+                Ok(delay) => Some(delay),
+                Err(_) => None,
             })
             .max()
-    }
-
-    /// Shift this zone's upper bounds by `delay` in time.
-    ///
-    /// - `delay = +∞`: take the future (up) – all clocks become unbounded.
-    /// - `delay > 0`: relax each finite upper bound (no closure needed).
-    /// - `delay < 0`: tighten each finite upper bound, then re-canonicalize via `clean()`.
-    /// - `delay = 0`: no-op.
-    pub fn delay(mut self, delay: Relation) -> Result<Self, DBM<Unsafe>> {
-        if delay.is_infinity() {
-            self.up();
-            return Ok(self);
-        }
-
-        // Positive or zero delay → relax bounds on `self`.
-        if delay == ZERO {
-            return Ok(self);
-        } else if delay > ZERO {
-            for clock in (REFERENCE + 1)..self.dimensions() {
-                let upper = self.upper(clock);
-                if !upper.is_infinity() {
-                    self.set_upper(clock, upper + delay);
-                }
-            }
-            return Ok(self);
-        }
-
-        // Negative delay → tighten via a dirty DBM, then clean() to get the cannonical form (if possible).
-        let mut dirty_dbm = self.dirty();
-        for clock in (REFERENCE + 1)..dirty_dbm.dimensions() {
-            if !dirty_dbm.upper(clock).is_infinity() {
-                dirty_dbm[(clock, REFERENCE)] += delay;
-            }
-        }
-        dirty_dbm.clean()
     }
 }
 
@@ -1242,6 +1212,15 @@ mod tests {
     }
 
     #[test]
+    fn dbm1_clock_intervals() {
+        let dbm = dbm1();
+        let intervals = dbm.clock_intervals();
+        assert_eq!(2, intervals.len());
+        assert_eq!("(1, 3)", intervals[0].to_string());
+        assert_eq!("(2, 3)", intervals[1].to_string());
+    }
+
+    #[test]
     fn test_dbm1() {
         assert_eq!(
             "-x < -1 ∧ x < 3 ∧ x - y < 1 ∧ -y < -2 ∧ y < 3 ∧ y - x < 2",
@@ -1274,49 +1253,42 @@ mod tests {
     }
 
     #[test]
-    fn dbm1_delay() {
-        let mut dbm = dbm1();
-        dbm = dbm.delay(Relation::weak(2)).ok().unwrap();
+    fn dbm1_dbm1_delay_enabled_windows() {
+        let dbm1 = dbm1();
+        let windows = dbm1.delay_enabled_windows(&dbm1);
+        assert_eq!("[0, 2]", windows[0].to_string());
+        assert_eq!("[0, 1]", windows[1].to_string());
+        let window = dbm1.delay_enabled_window(&dbm1).unwrap();
+        assert_eq!("[0, 1]", window.to_string());
+        let clamped = dbm1.clamp_window(dbm1.clone(), window).ok().unwrap();
         assert_eq!(
-            "-x < -1 ∧ x < 5 ∧ x - y < 1 ∧ -y < -2 ∧ y < 5 ∧ y - x < 2",
-            dbm.fmt_conjunctions(&vec!["x", "y"])
+            "-x < -1 ∧ x < 2 ∧ x - y < 0 ∧ -y < -2 ∧ y < 3 ∧ y - x < 2",
+            clamped.fmt_conjunctions(&vec!["x", "y"])
         );
-        assert!(dbm.clone().delay(Relation::weak(-3)).is_err());
     }
 
     #[test]
-    fn dbm1_min_max_delay() {
-        let dbm = dbm1();
-        let delayed = dbm.clone().delay(Relation::weak(1)).ok().unwrap();
+    fn dbm1_dbm3_delay_enabled_windows() {
+        let dbm1 = dbm1();
+        let dbm3 = dbm3();
+        let windows = dbm3.delay_enabled_windows(&dbm1);
+        assert_eq!("[1↓, 3↓]", windows[0].to_string());
+        assert_eq!("[2↓, 3↓]", windows[1].to_string());
+        let window = dbm3.delay_enabled_window(&dbm1).unwrap();
+        assert_eq!("[2↓, 3↓]", window.to_string());
+        let clamped = dbm3.clamp_window(dbm1, window).ok().unwrap();
         assert_eq!(
-            "-x < -1 ∧ x < 4 ∧ x - y < 1 ∧ -y < -2 ∧ y < 4 ∧ y - x < 2",
-            delayed.fmt_conjunctions(&vec!["x", "y"])
+            "-x < -2 ∧ x < 3 ∧ x - y < 1 ∧ -y < -2 ∧ y < 3 ∧ y - x < 1",
+            clamped.fmt_conjunctions(&vec!["x", "y"])
         );
-        assert_eq!("(1, <)", dbm.min_change(&delayed).to_string());
-        assert_eq!("(1, <)", dbm.max_change(&delayed).to_string());
     }
 
     #[test]
-    fn dbm4_delay() {
-        let mut dbm = dbm4();
-        dbm = dbm.delay(Relation::weak(2)).ok().unwrap();
-        assert_eq!(
-            "-x ≤ 0 ∧ x ≤ 3 ∧ x - y ≤ 1 ∧ -y ≤ 0 ∧ y ≤ 4 ∧ y - x ≤ 2",
-            dbm.fmt_conjunctions(&vec!["x", "y"])
-        );
-        assert!(dbm.clone().delay(Relation::weak(-4)).is_err());
-    }
-
-    #[test]
-    fn dbm4_min_max_delay() {
-        let dbm = dbm4();
-        let delayed = dbm.clone().delay(Relation::weak(2)).ok().unwrap();
-        assert_eq!(
-            "-x ≤ 0 ∧ x ≤ 3 ∧ x - y ≤ 1 ∧ -y ≤ 0 ∧ y ≤ 4 ∧ y - x ≤ 2",
-            delayed.fmt_conjunctions(&vec!["x", "y"])
-        );
-        assert_eq!("(2, ≤)", dbm.min_change(&delayed).to_string());
-        assert_eq!("(2, ≤)", dbm.max_change(&delayed).to_string());
+    fn dbm3_intersection_dbm1() {
+        let dbm3 = dbm3();
+        let dbm1 = dbm1();
+        let intersection = dbm3.intersection(&dbm1).unwrap();
+        assert_eq!("-x < -1 ∧ x < 3 ∧ x - y < 1 ∧ -y < -2 ∧ y < 3 ∧ y - x < 2", intersection.fmt_conjunctions(&vec!["x", "y"]));
     }
 
     #[test]

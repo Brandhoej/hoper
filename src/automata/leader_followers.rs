@@ -1,12 +1,10 @@
-use itertools::Itertools;
-
-use crate::zones::constraint::{Relation, ZERO};
+use crate::zones::delay::Delay;
 
 use super::{
     channel::Channel,
     htiots::{HyperState, HyperTransition, SystemOfSystems, HTIOTS},
     tioa::Traversal,
-    tiots::{State, Transition, TIOTS},
+    tiots::{State, TIOTS},
 };
 
 /// A system of systems where the delay requires all followers to be able to perform atleast the same delay
@@ -57,7 +55,7 @@ impl HTIOTS for LeaderFollowers {
         }
 
         let mut extrapolations: Vec<State> = Vec::with_capacity(state.len());
-        let mut delays: Vec<Option<Relation>> = vec![None; state.len()];
+        let mut delays: Vec<Option<Delay>> = vec![None; state.len()];
         for (system, state) in state.iter().enumerate() {
             // Step 1: Compute all the extrapolations.
             let extrapolation = match self.systems[system].delay(state.clone()) {
@@ -80,10 +78,10 @@ impl HTIOTS for LeaderFollowers {
 
         // If the leader did not delay but instead got more permissive then it is the same as no delay.
         let mut leader_delay = delays[self.leader];
-        println!("Leader delay {}", leader_delay.unwrap());
         if leader_delay.is_none() {
-            leader_delay = Some(ZERO);
+            leader_delay = Some(Delay::exact(0));
         }
+        println!("Leader delay: {}", leader_delay.unwrap().to_string());
 
         // Step 3: Check if any follower delay is less than the leader's.
         // If that is the case the follower is unable to follow the leader.
