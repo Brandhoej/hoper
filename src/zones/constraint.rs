@@ -14,6 +14,8 @@ use rand::{
     Rng,
 };
 
+use super::delay::Delay;
+
 /// The unique index of a clock. This can be used to directly address the DBM.
 pub type Clock = u16;
 

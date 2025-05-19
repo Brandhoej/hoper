@@ -9,11 +9,14 @@ mod tests {
         channel::Channel,
         composition::Composition,
         expressions::{Comparison, Expression},
+        htiots::HTIOTS,
         input_enabled::InputEnabled,
         ioa::IOA,
+        leader_followers::LeaderFollowers,
         partitioned_symbol_table::PartitionedSymbolTable,
         refinement::Refinement,
         statements::Statement,
+        tioa::{LocationTree, TIOA},
     };
 
     fn new_specification(partition: u32, symbols: &mut PartitionedSymbolTable) -> Automaton {
@@ -427,6 +430,32 @@ mod tests {
     }
 
     #[test]
+    fn manual_specification_traversal() {
+        let mut symbols = PartitionedSymbolTable::new();
+        let specification = new_specification(1, &mut symbols);
+        let htiots = LeaderFollowers::new(
+            vec![Box::new(specification.clone()), Box::new(specification)],
+            0,
+        );
+
+        // Global declarations:
+        let grant = Action::new(symbols.intern(0, "grant"));
+
+        let mut initial_state = htiots.initial_state();
+        initial_state = htiots.delay(initial_state).unwrap();
+
+        let enabled = htiots.enabled(
+            &initial_state,
+            vec![
+                Some(Channel::new_input(grant)),
+                Some(Channel::new_input(grant)),
+            ],
+        );
+
+        assert_eq!(enabled.len(), 2);
+    }
+
+    #[test]
     fn specification_refines_self() {
         let mut symbols = PartitionedSymbolTable::new();
         let specification = new_specification(1, &mut symbols);
@@ -517,8 +546,6 @@ mod tests {
 
     #[test]
     fn machine_researcher_refines_self() {
-        // FAILS!
-        // I believe the reason is that the researcher can move from 0 to 3 and 0 to 1 which should not be possible.
         let mut symbols = PartitionedSymbolTable::new();
         let machine = new_machine(3, &mut symbols);
         let researcher = new_researcher(5, &mut symbols);
@@ -539,7 +566,6 @@ mod tests {
 
     #[test]
     fn administration_researcher_refines_self() {
-        // FAILS!
         let mut symbols = PartitionedSymbolTable::new();
         let administration = new_administration(2, &mut symbols);
         let researcher = new_researcher(5, &mut symbols);
@@ -560,7 +586,6 @@ mod tests {
 
     #[test]
     fn machine_administration_researcher_refines_self() {
-        // FAILS! Same as "machine_researcher"
         let mut symbols = PartitionedSymbolTable::new();
         let administration = new_administration(2, &mut symbols);
         let researcher = new_researcher(5, &mut symbols);
@@ -587,7 +612,6 @@ mod tests {
 
     #[test]
     fn machine_administration_researcher_refines_specification() {
-        // FAILS!
         let mut symbols = PartitionedSymbolTable::new();
         let administration = new_administration(2, &mut symbols);
         let researcher = new_researcher(5, &mut symbols);

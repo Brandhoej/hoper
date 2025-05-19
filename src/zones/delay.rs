@@ -1,4 +1,8 @@
-use std::{cmp::Ordering, fmt, ops::Add};
+use std::{
+    cmp::Ordering,
+    fmt::{self, Display},
+    ops::Add,
+};
 
 use super::constraint::{Limit, Relation, Strictness, INFINITY};
 
@@ -21,23 +25,21 @@ use super::constraint::{Limit, Relation, Strictness, INFINITY};
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Delay {
-    /// Delay by exactly `d` units without changing constraint strictness.
-    ///
-    /// No ε adjustment (`↑` or `↓`).
+    /// Delay by exactly `d`.
     Exact(Limit),
 
-    /// Delay by `d` units and relax strict constraints (`<` becomes `≤`).
+    /// Delay by a bit more than `d`.
     ///
-    /// Conceptually represents `d↑`.
+    /// Conceptually represents `d + ε` displayed as `d↑`.
     Relaxed(Limit),
 
-    /// Delay by `d` units and tighten non-strict constraints (`≤` becomes `<`).
+    /// Delay by a bit less than `d`.
     ///
-    /// Conceptually represents `d↓`.
+    /// Conceptually represents `d - ε` displayed as `d↓`.
     Tightened(Limit),
 
     /// Represents an unbounded delay in the positive direction.
-    Up,
+    Infinite,
 }
 
 /// Represents a delay with possible semantic variations: exact, relaxed (↑), or tightened (↓).
@@ -58,14 +60,14 @@ impl Delay {
     }
 
     /// Constructs an unbounded positive delay.
-    pub const fn up() -> Self {
-        Self::Up
+    pub const fn infinite() -> Self {
+        Self::Infinite
     }
 
     /// Constructs a delay that represents the delay between `before` and `after`.
     pub const fn between(before: Relation, after: Relation) -> Result<Self, ()> {
         match (before.is_infinity(), after.is_infinity()) {
-            (false, true) => return Ok(Self::up()),
+            (false, true) => return Ok(Self::infinite()),
             (true, true) => return Ok(Self::exact(0)),
             (true, false) => return Err(()),
             (_, _) => {}
@@ -99,15 +101,15 @@ impl Delay {
     }
 
     /// Returns `true` if the delay is infinite.
-    pub const fn is_up(&self) -> bool {
-        matches!(self, Delay::Up)
+    pub const fn is_infinite(&self) -> bool {
+        matches!(self, Delay::Infinite)
     }
 
     /// Returns the numerical component of the delay.
     pub const fn limit(&self) -> Option<Limit> {
         match self {
             Delay::Exact(limit) | Delay::Relaxed(limit) | Delay::Tightened(limit) => Some(*limit),
-            Delay::Up => None,
+            Delay::Infinite => None,
         }
     }
 
@@ -118,7 +120,7 @@ impl Delay {
     /// strictness depending on its variant (`Relaxed`, `Tightened`, or `Exact`).
     pub fn elapse(&self, relation: Relation) -> Relation {
         match self {
-            Delay::Up => INFINITY,
+            Delay::Infinite => INFINITY,
             Delay::Exact(d) | Delay::Relaxed(d) | Delay::Tightened(d) => {
                 if relation.is_infinity() {
                     return relation;
@@ -137,20 +139,20 @@ impl Delay {
     }
 }
 
-impl fmt::Display for Delay {
+impl Display for Delay {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Delay::Exact(limit) => write!(f, "{}", limit),
             Delay::Relaxed(limit) => write!(f, "{}↑", limit),
             Delay::Tightened(limit) => write!(f, "{}↓", limit),
-            Delay::Up => write!(f, "∞↑"),
+            Delay::Infinite => write!(f, "∞↑"),
         }
     }
 }
 
 impl Ord for Delay {
     fn cmp(&self, other: &Self) -> Ordering {
-        if !self.is_up() && !other.is_up() {
+        if !self.is_infinite() && !other.is_infinite() {
             let limit = self.limit().cmp(&other.limit());
             if limit != Ordering::Equal {
                 return limit;
@@ -171,13 +173,13 @@ impl Ord for Delay {
 
             (Delay::Tightened(_), Delay::Tightened(_)) => Ordering::Equal,
 
-            (Delay::Up, Delay::Up) => Ordering::Equal,
-            (Delay::Up, Delay::Relaxed(_)) => Ordering::Greater,
-            (Delay::Up, Delay::Tightened(_)) => Ordering::Greater,
-            (Delay::Up, Delay::Exact(_)) => Ordering::Greater,
-            (Delay::Relaxed(_), Delay::Up) => Ordering::Less,
-            (Delay::Tightened(_), Delay::Up) => Ordering::Less,
-            (Delay::Exact(_), Delay::Up) => Ordering::Less,
+            (Delay::Infinite, Delay::Infinite) => Ordering::Equal,
+            (Delay::Infinite, Delay::Relaxed(_)) => Ordering::Greater,
+            (Delay::Infinite, Delay::Tightened(_)) => Ordering::Greater,
+            (Delay::Infinite, Delay::Exact(_)) => Ordering::Greater,
+            (Delay::Relaxed(_), Delay::Infinite) => Ordering::Less,
+            (Delay::Tightened(_), Delay::Infinite) => Ordering::Less,
+            (Delay::Exact(_), Delay::Infinite) => Ordering::Less,
         }
     }
 }
@@ -221,7 +223,7 @@ mod tests {
         assert_eq!(Some(-123), Delay::exact(-123).limit());
         assert_eq!(Some(-123), Delay::relax(-123).limit());
         assert_eq!(Some(-123), Delay::tighten(-123).limit());
-        assert_eq!(None, Delay::up().limit())
+        assert_eq!(None, Delay::infinite().limit())
     }
 
     #[test]
@@ -229,19 +231,19 @@ mod tests {
         assert!(Delay::exact(1).is_exact());
         assert!(!Delay::exact(1).is_relaxed());
         assert!(!Delay::exact(1).is_tightened());
-        assert!(!Delay::exact(1).is_up());
+        assert!(!Delay::exact(1).is_infinite());
         assert!(Delay::relax(1).is_relaxed());
         assert!(!Delay::relax(1).is_exact());
         assert!(!Delay::relax(1).is_tightened());
-        assert!(!Delay::relax(1).is_up());
+        assert!(!Delay::relax(1).is_infinite());
         assert!(Delay::tighten(1).is_tightened());
         assert!(!Delay::tighten(1).is_exact());
         assert!(!Delay::tighten(1).is_relaxed());
-        assert!(!Delay::tighten(1).is_up());
-        assert!(Delay::up().is_up());
-        assert!(!Delay::up().is_tightened());
-        assert!(!Delay::up().is_exact());
-        assert!(!Delay::up().is_relaxed());
+        assert!(!Delay::tighten(1).is_infinite());
+        assert!(Delay::infinite().is_infinite());
+        assert!(!Delay::infinite().is_tightened());
+        assert!(!Delay::infinite().is_exact());
+        assert!(!Delay::infinite().is_relaxed());
     }
 
     #[test]
@@ -327,7 +329,7 @@ mod tests {
         let exact = Delay::exact(5);
         let relaxed = Delay::relax(5);
         let tightened = Delay::tighten(5);
-        let up = Delay::up();
+        let up = Delay::infinite();
 
         assert_eq!(Ordering::Equal, relaxed.cmp(&relaxed));
         assert_eq!(Ordering::Greater, relaxed.cmp(&exact));

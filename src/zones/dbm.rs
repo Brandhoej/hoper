@@ -850,7 +850,8 @@ impl DBM<Canonical> {
                 .unwrap();
                 let upper =
                     Delay::between(self.lower(clock).negate_limit(), other.upper(clock)).unwrap();
-                Window::new(lower, upper)
+                println!("lower: {}, upper: {}", lower, upper);
+                Window::new(lower, upper).unwrap()
             })
             .collect()
     }
@@ -886,8 +887,10 @@ impl DBM<Canonical> {
         let mut dirty = other.dirty();
 
         for clock in REFERENCE + 1..self.dimensions() {
+            println!("before lower: {}", self.lower(clock));
             let lower = (self.lower(clock).negate_limit() + window.lower()).negate_limit();
             let upper = self.lower(clock).negate_limit() + window.upper();
+            println!("after lower: {} upper: {}", lower, upper);
             dirty.tighten_lower(clock, lower);
             dirty.tighten_upper(clock, upper);
         }

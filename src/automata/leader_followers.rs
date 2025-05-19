@@ -56,18 +56,18 @@ impl HTIOTS for LeaderFollowers {
 
         let mut extrapolations: Vec<State> = Vec::with_capacity(state.len());
         let mut delays: Vec<Option<Delay>> = vec![None; state.len()];
-        for (system, state) in state.iter().enumerate() {
+        for (system, before) in state.iter().enumerate() {
             // Step 1: Compute all the extrapolations.
-            let extrapolation = match self.systems[system].delay(state.clone()) {
-                Ok(extrapolation) => extrapolation,
+            let after = match self.systems[system].delay(before.clone()) {
+                Ok(after) => after,
                 // Atleast one of the systems could not delay.
                 Err(_) => return Err(()),
             };
 
             // Step 2: Compute the smallest delay possible.
-            delays[system] = state.zone().min_delay(extrapolation.zone());
+            delays[system] = before.zone().min_delay(after.zone());
 
-            extrapolations.push(extrapolation);
+            extrapolations.push(after);
         }
 
         // No system performed any delay (Maybe they all got more restrictive).

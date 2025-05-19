@@ -1,6 +1,5 @@
 use std::{
     ops::{Index, IndexMut},
-    process::id,
     slice,
     vec::IntoIter,
 };
@@ -232,17 +231,30 @@ impl SystemOfSystems {
             .iter()
             .enumerate()
             .map(|(idx, current)| {
-                // TODO: Check if a window was computed. If not, return an error.
-                state[idx]
+                match state[idx]
                     .zone()
-                    .delay_enabled_window(current.zone())
-                    .unwrap()
+                    .delay_enabled_window(current.zone()) {
+                        Some(window) => Some(window),
+                        None => None,
+                    }
             })
             .collect();
+        if windows.iter().any(|window| window.is_none()) {
+            return Err(())
+        }
+
+        let windows = windows.into_iter().map(|window| window.unwrap()).collect();
+
         let common_window = match Window::intersections(windows) {
             Some(window) => window,
             None => return Err(()),
         };
+
+        if common_window.is_zero() {
+            return Err(())
+        }
+
+        println!("Common window: {}", common_window);
 
         // Step 3: Restrict discrete steps inside the common window.
         let clamped: Vec<_> = states
@@ -291,14 +303,8 @@ impl SystemOfSystems {
             .iter()
             .enumerate()
             .map(|(idx, traversal)| match traversal {
-                Some(traversal) => (
-                    Some(traversal.edge()),
-                    traversal.destination().clone(),
-                ),
-                None => (
-                    None,
-                    state[idx].location().clone(),
-                ),
+                Some(traversal) => (Some(traversal.edge()), traversal.destination().clone()),
+                None => (None, state[idx].location().clone()),
             })
             .unzip();
 
@@ -353,8 +359,6 @@ impl SystemOfSystems {
         state: &HyperState,
         channels: Vec<Option<Channel>>,
     ) -> Vec<HyperTransition> {
-        // FIXME: We have to consider the minimum and maximum delay required for the edge to be enabled. Only when the product edge delay interval interesects is the intersection state considered and only then we the hypertransition exists.
-
         let mut hyper_transitions = Vec::new();
 
         for transitions in self
@@ -363,7 +367,7 @@ impl SystemOfSystems {
             .enumerate()
             .map(|(idx, system)| match &channels[idx] {
                 Some(channel) => system
-                    .enabled(&state[idx], channel)
+                    .outgoing(&state[idx], channel)
                     .into_iter()
                     .map(Some)
                     .collect(),
@@ -384,8 +388,18 @@ impl SystemOfSystems {
                 .unzip();
 
             let hyper_state = HyperState::new(states);
-            let hyper_transition = HyperTransition::discrete(hyper_state, traversals);
-            hyper_transitions.push(hyper_transition);
+            let edges: Vec<_> = traversals
+                .iter()
+                .map(|traversal| match traversal {
+                    Some(traversal) => Some(traversal.edge()),
+                    None => None,
+                })
+                .collect();
+
+            if let Ok(hyper_state) = self.guard(hyper_state, edges) {
+                let hyper_transition = HyperTransition::discrete(hyper_state, traversals);
+                hyper_transitions.push(hyper_transition);
+            }
         }
 
         hyper_transitions

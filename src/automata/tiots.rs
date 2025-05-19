@@ -317,6 +317,8 @@ where
     /// # Returns
     /// A vector containing all enabled transitions.
     fn enabled(&self, state: &State, channel: &Channel) -> Vec<Transition>;
+
+    fn outgoing(&self, state: &State, channel: &Channel) -> Vec<Transition>;
 }
 
 impl<T: ?Sized + TIOA> TIOTS for T {
@@ -484,13 +486,20 @@ impl<T: ?Sized + TIOA> TIOTS for T {
         self.outgoing_traversals(state.location(), *channel)
             .into_iter()
             .flatten()
-            .filter_map(move |traversal| {
-                let transition = Transition::discrete(state.clone(), traversal);
-                match self.is_enabled(&transition) {
-                    Ok(true) => Some(transition),
-                    Ok(false) | Err(_) => None,
-                }
-            })
+            .filter_map(
+                move |traversal| match self.guard(state.clone(), traversal.edge()) {
+                    Ok(state) => Some(Transition::discrete(state, traversal)),
+                    Err(_) => None,
+                },
+            )
+            .collect()
+    }
+
+    fn outgoing(&self, state: &State, channel: &Channel) -> Vec<Transition> {
+        self.outgoing_traversals(state.location(), *channel)
+            .into_iter()
+            .flatten()
+            .map(|traversal| Transition::discrete(state.clone(), traversal))
             .collect()
     }
 }
