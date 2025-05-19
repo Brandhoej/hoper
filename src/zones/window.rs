@@ -11,7 +11,7 @@ pub struct Window {
 impl Window {
     pub fn new(lower: Delay, upper: Delay) -> Result<Window, ()> {
         if lower.is_infinite() && !upper.is_infinite() {
-            return Err(())
+            return Err(());
         }
 
         if let (Some(a), Some(b)) = (lower.limit(), upper.limit()) {

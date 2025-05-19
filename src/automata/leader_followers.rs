@@ -81,7 +81,6 @@ impl HTIOTS for LeaderFollowers {
         if leader_delay.is_none() {
             leader_delay = Some(Delay::exact(0));
         }
-        println!("Leader delay: {}", leader_delay.unwrap().to_string());
 
         // Step 3: Check if any follower delay is less than the leader's.
         // If that is the case the follower is unable to follow the leader.

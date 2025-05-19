@@ -230,17 +230,15 @@ impl SystemOfSystems {
         let windows: Vec<_> = states
             .iter()
             .enumerate()
-            .map(|(idx, current)| {
-                match state[idx]
-                    .zone()
-                    .delay_enabled_window(current.zone()) {
-                        Some(window) => Some(window),
-                        None => None,
-                    }
-            })
+            .map(
+                |(idx, current)| match state[idx].zone().delay_enabled_window(current.zone()) {
+                    Some(window) => Some(window),
+                    None => None,
+                },
+            )
             .collect();
         if windows.iter().any(|window| window.is_none()) {
-            return Err(())
+            return Err(());
         }
 
         let windows = windows.into_iter().map(|window| window.unwrap()).collect();
@@ -251,10 +249,8 @@ impl SystemOfSystems {
         };
 
         if common_window.is_zero() {
-            return Err(())
+            return Err(());
         }
-
-        println!("Common window: {}", common_window);
 
         // Step 3: Restrict discrete steps inside the common window.
         let clamped: Vec<_> = states
