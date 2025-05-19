@@ -15,14 +15,6 @@ use super::constraint::{Limit, Relation, Strictness, INFINITY};
 /// There’s no `Relation` that, when added to `(5, <)`, results in `(10, ≤)` because relation addition
 /// always produces the strictest bound of the operands. Thus, `Delay` exists to explicitly model the
 /// relaxation (or tightening) of bounds over time.
-///
-/// # Examples
-///
-/// ```rust
-/// let exact = Delay::exact(5);       // Exactly 5 time units; preserves strictness
-/// let relaxed = Delay::relax(5);     // 5 time units ↑; relaxes strict bounds
-/// let tightened = Delay::tighten(5); // 5 time units ↓; tightens non-strict bounds
-/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Delay {
     /// Delay by exactly `d`.

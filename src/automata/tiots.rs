@@ -599,7 +599,7 @@ mod tests {
             .unwrap();
         following = automaton.delay(following).unwrap();
         assert_eq!(
-            "-x ≤ 0 ∧ x < 10",
+            "-x < -2 ∧ x < 10",
             following.zone().fmt_conjunctions(&vec!["x"])
         );
     }

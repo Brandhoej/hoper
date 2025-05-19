@@ -1256,10 +1256,10 @@ mod tests {
     fn dbm1_dbm1_delay_enabled_windows() {
         let dbm1 = dbm1();
         let windows = dbm1.delay_enabled_windows(&dbm1);
-        assert_eq!("[0, 2]", windows[0].to_string());
-        assert_eq!("[0, 1]", windows[1].to_string());
+        assert_eq!("0..2", windows[0].to_string());
+        assert_eq!("0..1", windows[1].to_string());
         let window = dbm1.delay_enabled_window(&dbm1).unwrap();
-        assert_eq!("[0, 1]", window.to_string());
+        assert_eq!("0..1", window.to_string());
         let clamped = dbm1.clamp_window(dbm1.clone(), window).ok().unwrap();
         assert_eq!(
             "-x < -1 ∧ x < 2 ∧ x - y < 0 ∧ -y < -2 ∧ y < 3 ∧ y - x < 2",
@@ -1272,10 +1272,10 @@ mod tests {
         let dbm1 = dbm1();
         let dbm3 = dbm3();
         let windows = dbm3.delay_enabled_windows(&dbm1);
-        assert_eq!("[1↓, 3↓]", windows[0].to_string());
-        assert_eq!("[2↓, 3↓]", windows[1].to_string());
+        assert_eq!("1↓..3↓", windows[0].to_string());
+        assert_eq!("2↓..3↓", windows[1].to_string());
         let window = dbm3.delay_enabled_window(&dbm1).unwrap();
-        assert_eq!("[2↓, 3↓]", window.to_string());
+        assert_eq!("2↓..3↓", window.to_string());
         let clamped = dbm3.clamp_window(dbm1, window).ok().unwrap();
         assert_eq!(
             "-x < -2 ∧ x < 3 ∧ x - y < 1 ∧ -y < -2 ∧ y < 3 ∧ y - x < 1",
