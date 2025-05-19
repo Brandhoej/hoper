@@ -1,8 +1,10 @@
 use crate::zones::{
+    self,
     bounds::Bounds,
     constraint::{Clock, Limit, Relation, REFERENCE},
     dbm::{Canonical, DBM},
     delay::Delay,
+    window::Window,
 };
 
 use super::{
@@ -11,7 +13,7 @@ use super::{
     interpreter::Interpreter,
     ioa::IOA,
     ta::TA,
-    tioa::{LocationTree, Traversal, TIOA},
+    tioa::{EdgeTree, LocationTree, Traversal, TIOA},
 };
 
 #[derive(Clone, Debug)]
@@ -163,6 +165,16 @@ impl State {
         self.loosen(REFERENCE, clock, relation)
     }
 
+    pub fn clamp_window(&self, mut other: Self, window: Window) -> Result<Self, ()> {
+        match self.zone.clamp_window(other.zone, window) {
+            Ok(zone) => {
+                other.zone = zone;
+                Ok(other)
+            }
+            Err(_) => return Err(()),
+        }
+    }
+
     // FIXME: I think this should assign a readonly variable in the environment designated for the location.
     pub fn set_location(&mut self, location: LocationTree) {
         self.location = location
@@ -264,6 +276,9 @@ where
     /// - `Err(())`: If the delay is not possible due to invariant violations or transition failure.
     fn delay(&self, state: State) -> Result<State, ()>;
 
+    fn guard(&self, state: State, edge: &EdgeTree) -> Result<State, ()>;
+    fn update(&self, state: State, edge: &EdgeTree) -> Result<State, ()>;
+
     /// Applies a discrete transition to the given `State` using the provided `Traversal`.
     ///
     /// - Updates the system state based on the traversal's update statements.
@@ -343,17 +358,37 @@ impl<T: ?Sized + TIOA> TIOTS for T {
         Ok(state)
     }
 
-    fn discrete(&self, mut state: State, traversal: Traversal) -> Result<State, ()> {
-        let edge = match self.edge(traversal.edge()) {
+    fn guard(&self, state: State, edge: &EdgeTree) -> Result<State, ()> {
+        let edge = match self.edge(&edge) {
             Ok(edge) => edge,
             Err(_) => return Err(()),
         };
 
         let mut interpreter = Interpreter::new();
-        state = match interpreter.statement(state, edge.update()) {
+        interpreter.constrain(state, edge.guard())
+    }
+
+    fn update(&self, state: State, edge: &EdgeTree) -> Result<State, ()> {
+        let edge = match self.edge(&edge) {
+            Ok(edge) => edge,
+            Err(_) => return Err(()),
+        };
+
+        let mut interpreter = Interpreter::new();
+        interpreter.statement(state, edge.update())
+    }
+
+    fn discrete(&self, mut state: State, traversal: Traversal) -> Result<State, ()> {
+        state = match self.guard(state, traversal.edge()) {
             Ok(state) => state,
             Err(_) => return Err(()),
         };
+
+        state = match self.update(state, traversal.edge()) {
+            Ok(state) => state,
+            Err(_) => return Err(()),
+        };
+
         state.set_location(traversal.destination().clone());
 
         Ok(state)

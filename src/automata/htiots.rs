@@ -10,11 +10,14 @@ use itertools::{
     Itertools,
 };
 
-use crate::zones::dbm::{Canonical, DBM};
+use crate::zones::{
+    dbm::{Canonical, DBM},
+    window::Window,
+};
 
 use super::{
     channel::Channel,
-    tioa::{LocationTree, Traversal},
+    tioa::{EdgeTree, LocationTree, Traversal},
     tiots::{State, Transition, TIOTS},
 };
 
@@ -54,6 +57,16 @@ impl HyperState {
 
     pub fn into_iter(self) -> IntoIter<State> {
         self.states.into_iter()
+    }
+
+    // FIXME: I think this should assign a readonly variable in the environment designated for the location.
+    pub fn set_location(&mut self, locations: Vec<LocationTree>) {
+        if self.states.len() != locations.len() {
+            panic!()
+        }
+        for idx in 0..self.states.len() {
+            self.states[idx].set_location(locations[idx].clone());
+        }
     }
 }
 
@@ -191,27 +204,117 @@ impl SystemOfSystems {
         HyperState::new(states)
     }
 
-    /// Performs the state changes from the traversal and updates the states accordingly.
-    pub fn discrete(
+    pub fn guard(
         &self,
         state: HyperState,
-        traversals: Vec<Option<Traversal>>,
+        edges: Vec<Option<&EdgeTree>>,
     ) -> Result<HyperState, ()> {
-        let states = self
+        // Step 0: Copy the original state.
+        let original = state.clone();
+
+        // Step 1: Compute the zones which are enabled for the guards.
+        let states: Vec<_> = self
             .systems
             .iter()
             .enumerate()
-            // Maps None traversals to original state which essentially means that no traversal is allowed but wont change the state.
-            .map(|(idx, system)| match &traversals[idx] {
-                Some(traversal) => system.discrete(state[idx].clone(), traversal.clone()),
+            .map(|(idx, system)| match edges[idx] {
+                Some(edge) => system.guard(state[idx].clone(), edge),
                 None => Ok(state[idx].clone()),
-            });
-        if states.clone().any(|state| state.is_err()) {
+            })
+            .collect();
+        if states.iter().any(|state| state.is_err()) {
             return Err(());
         }
-        Ok(HyperState::new(
-            states.map(|state| state.ok().unwrap()).collect(),
-        ))
+        let states: Vec<_> = states.into_iter().map(|state| state.unwrap()).collect();
+
+        // Step 2: Compute the windows of the guard.
+        let windows: Vec<_> = states
+            .iter()
+            .enumerate()
+            .map(|(idx, current)| {
+                // TODO: Check if a window was computed. If not, return an error.
+                state[idx]
+                    .zone()
+                    .delay_enabled_window(current.zone())
+                    .unwrap()
+            })
+            .collect();
+        let common_window = match Window::intersections(windows) {
+            Some(window) => window,
+            None => return Err(()),
+        };
+
+        // Step 3: Restrict discrete steps inside the common window.
+        let clamped: Vec<_> = states
+            .into_iter()
+            .enumerate()
+            .map(
+                |(idx, state)| match original[idx].clamp_window(state, common_window) {
+                    Ok(state) => state,
+                    Err(_) => unreachable!(),
+                },
+            )
+            .collect();
+
+        Ok(HyperState::new(clamped))
+    }
+
+    pub fn update(
+        &self,
+        state: HyperState,
+        edges: Vec<Option<&EdgeTree>>,
+    ) -> Result<HyperState, ()> {
+        let states: Vec<_> = self
+            .systems
+            .iter()
+            .enumerate()
+            .map(|(idx, system)| match edges[idx] {
+                Some(edge) => system.update(state[idx].clone(), edge),
+                None => Ok(state[idx].clone()),
+            })
+            .collect();
+        if states.iter().any(|state| state.is_err()) {
+            return Err(());
+        }
+        let states: Vec<_> = states.into_iter().map(|state| state.unwrap()).collect();
+
+        Ok(HyperState::new(states))
+    }
+
+    /// Performs the state changes from the traversal and updates the states accordingly.
+    pub fn discrete(
+        &self,
+        mut state: HyperState,
+        traversals: Vec<Option<Traversal>>,
+    ) -> Result<HyperState, ()> {
+        let (edges, destinations): (Vec<_>, Vec<_>) = traversals
+            .iter()
+            .enumerate()
+            .map(|(idx, traversal)| match traversal {
+                Some(traversal) => (
+                    Some(traversal.edge()),
+                    traversal.destination().clone(),
+                ),
+                None => (
+                    None,
+                    state[idx].location().clone(),
+                ),
+            })
+            .unzip();
+
+        state = match self.guard(state, edges.clone()) {
+            Ok(state) => state,
+            Err(_) => return Err(()),
+        };
+
+        state = match self.update(state, edges) {
+            Ok(state) => state,
+            Err(_) => return Err(()),
+        };
+
+        state.set_location(destinations);
+
+        Ok(state)
     }
 
     pub fn is_valid(&self, state: &HyperState) -> Result<bool, ()> {

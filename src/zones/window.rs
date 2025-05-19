@@ -18,6 +18,7 @@ impl Window {
     }
 
     pub fn intersections(windows: Vec<Self>) -> Option<Self> {
+        // TODO: windows borrowed elements?
         let mut windows = windows.into_iter();
         let first = windows.next()?;
 

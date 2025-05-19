@@ -1288,7 +1288,10 @@ mod tests {
         let dbm3 = dbm3();
         let dbm1 = dbm1();
         let intersection = dbm3.intersection(&dbm1).unwrap();
-        assert_eq!("-x < -1 ∧ x < 3 ∧ x - y < 1 ∧ -y < -2 ∧ y < 3 ∧ y - x < 2", intersection.fmt_conjunctions(&vec!["x", "y"]));
+        assert_eq!(
+            "-x < -1 ∧ x < 3 ∧ x - y < 1 ∧ -y < -2 ∧ y < 3 ∧ y - x < 2",
+            intersection.fmt_conjunctions(&vec!["x", "y"])
+        );
     }
 
     #[test]

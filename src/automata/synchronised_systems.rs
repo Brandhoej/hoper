@@ -1,4 +1,4 @@
-use crate::zones::{constraint::Relation, delay::Delay};
+use crate::zones::delay::Delay;
 
 use super::{
     channel::Channel,
