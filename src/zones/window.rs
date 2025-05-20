@@ -46,9 +46,9 @@ impl Window {
         self.upper
     }
 
-    pub fn is_zero(&self) -> bool {
+    /*pub fn is_zero(&self) -> bool {
         self.lower.limit() == Some(0) && self.upper.limit() == Some(0)
-    }
+    }*/
 
     pub fn intersection(&self, other: &Self) -> Option<Self> {
         let (lower, upper) = (self.lower.max(other.lower), self.upper.min(other.upper));

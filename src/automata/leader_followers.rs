@@ -70,6 +70,19 @@ impl HTIOTS for LeaderFollowers {
             extrapolations.push(after);
         }
 
+        println!(
+            "  d1: {}",
+            extrapolations[0]
+                .zone()
+                .fmt_conjunctions(&vec!["x", "y", "z"])
+        );
+        println!(
+            "  d2: {}",
+            extrapolations[1]
+                .zone()
+                .fmt_conjunctions(&vec!["x", "y", "z"])
+        );
+
         // No system performed any delay (Maybe they all got more restrictive).
         // Since no delay was performed we don't have to synchronise delays across systems.
         if delays.iter().all(|delay| delay.is_none()) {
@@ -81,6 +94,7 @@ impl HTIOTS for LeaderFollowers {
         if leader_delay.is_none() {
             leader_delay = Some(Delay::exact(0));
         }
+        println!("leader delay: {}", leader_delay.unwrap());
 
         // Step 3: Check if any follower delay is less than the leader's.
         // If that is the case the follower is unable to follow the leader.
@@ -106,6 +120,19 @@ impl HTIOTS for LeaderFollowers {
 
             synchronisations.push(synchronisation);
         }
+
+        println!(
+            "  d1': {}",
+            synchronisations[0]
+                .zone()
+                .fmt_conjunctions(&vec!["x", "y", "z"])
+        );
+        println!(
+            "  d2': {}",
+            synchronisations[1]
+                .zone()
+                .fmt_conjunctions(&vec!["x", "y", "z"])
+        );
 
         Ok(HyperState::new(synchronisations))
     }

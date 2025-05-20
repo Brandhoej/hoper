@@ -4,7 +4,7 @@ use crate::zones::constraint::Clock;
 
 use super::{
     action::Action,
-    channel::{self, Channel},
+    channel::Channel,
     edge::Edge,
     ioa::IOA,
     location::Location,
@@ -49,7 +49,7 @@ use super::{
 /// This defines the structure of the parallel composition of two TIOAs, where actions from both automata can occur simultaneously
 /// while respecting their synchronization and interaction constraints, ensuring correct coordination of both systems.
 ///
-/// Parallel composition over multiple automata can be extended similarly, as `Aⁱ = (((A¹ ∥ A²) ∥ A³) ...)`.
+/// Parallel composition over multiple automata can be extended similarly, as `Aⁱ = (((A¹ ∥ A²) ∥ A³) ...)`. 
 #[derive(Clone)]
 pub struct Composition {
     lhs: Box<Specification>,
@@ -268,21 +268,32 @@ impl TIOA for Composition {
                 }
 
                 let mut edge_composition: Vec<Edge> = Vec::with_capacity(2);
-                let mut action: Option<Action> = None;
+                let mut lhs_action: Option<Action> = None;
+                let mut rhs_action: Option<Action> = None;
 
                 if !edges[0].is_identity() {
                     let lhs_edge = self.lhs.edge(&edges[0])?;
                     edge_composition.push(lhs_edge.clone());
-                    action = Some(lhs_edge.action().clone());
+                    lhs_action = Some(lhs_edge.action().clone());
                 }
 
                 if !edges[1].is_identity() {
                     let rhs_edge = self.rhs.edge(&edges[1])?;
                     edge_composition.push(rhs_edge.clone());
-                    action = Some(rhs_edge.action().clone());
+                    rhs_action = Some(rhs_edge.action().clone());
                 }
 
-                return if let Some(channel) = self.channel(action.unwrap()) {
+                let action = match (lhs_action, rhs_action) {
+                    (None, None) => unreachable!(),
+                    (None, Some(rhs)) => rhs,
+                    (Some(lhs), None) => lhs,
+                    (Some(lhs), Some(rhs)) => {
+                        assert_eq!(lhs, rhs);
+                        lhs
+                    }
+                };
+
+                return if let Some(channel) = self.channel(action) {
                     Ok(Edge::conjoin(channel, edge_composition).ok().unwrap())
                 } else {
                     Err(())

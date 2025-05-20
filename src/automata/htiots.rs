@@ -248,9 +248,15 @@ impl SystemOfSystems {
             None => return Err(()),
         };
 
-        if common_window.is_zero() {
-            return Err(());
-        }
+        println!(
+            "  s1: {}",
+            states[0].zone().fmt_conjunctions(&vec!["x", "y", "z"])
+        );
+        println!(
+            "  s2: {}",
+            states[1].zone().fmt_conjunctions(&vec!["x", "y", "z"])
+        );
+        println!("common window: {}", common_window);
 
         // Step 3: Restrict discrete steps inside the common window.
         let clamped: Vec<_> = states
@@ -258,11 +264,24 @@ impl SystemOfSystems {
             .enumerate()
             .map(
                 |(idx, state)| match original[idx].clamp_window(state, common_window) {
-                    Ok(state) => state,
-                    Err(_) => unreachable!(),
+                    Ok(state) => Some(state),
+                    Err(_) => None,
                 },
             )
             .collect();
+        if clamped.iter().any(|state| state.is_none()) {
+            return Err(());
+        }
+        let clamped: Vec<_> = clamped.into_iter().map(|state| state.unwrap()).collect();
+
+        println!(
+            "  s1': {}",
+            clamped[0].zone().fmt_conjunctions(&vec!["x", "y", "z"])
+        );
+        println!(
+            "  s2': {}",
+            clamped[1].zone().fmt_conjunctions(&vec!["x", "y", "z"])
+        );
 
         Ok(HyperState::new(clamped))
     }
@@ -383,7 +402,7 @@ impl SystemOfSystems {
                 })
                 .unzip();
 
-            let hyper_state = HyperState::new(states);
+            let mut hyper_state = HyperState::new(states);
             let edges: Vec<_> = traversals
                 .iter()
                 .map(|traversal| match traversal {
@@ -392,9 +411,15 @@ impl SystemOfSystems {
                 })
                 .collect();
 
-            if let Ok(hyper_state) = self.guard(hyper_state, edges) {
-                let hyper_transition = HyperTransition::discrete(hyper_state, traversals);
-                hyper_transitions.push(hyper_transition);
+            hyper_state = match self.guard(hyper_state, edges.clone()) {
+                Ok(hyper_state) => hyper_state,
+                Err(_) => continue,
+            };
+
+            let hyper_transition = HyperTransition::discrete(hyper_state, traversals);
+            match self.is_enabled(hyper_transition.clone()) {
+                Ok(enabled) if enabled => hyper_transitions.push(hyper_transition),
+                _ => {}
             }
         }
 
